@@ -111,110 +111,80 @@ sudo usermod -aG vboxusers "$USER"
 
 **Secure Boot :** si `mokutil --sb-state` affiche `SecureBoot enabled`, l’installation demande un mot de passe pour signer les modules VirtualBox. Au redémarrage suivant, l’écran bleu **MOK Management** apparaît : choisis **Enroll MOK**, puis saisis ce mot de passe.
 
-Ferme ta session puis rouvre-la (groupe `vboxusers`), ou redémarre. Vérifie :
-
-```bash
-VBoxManage --version
-lsmod | grep vboxdrv
-```
+Ferme ta session puis rouvre-la (groupe `vboxusers`), ou redémarre. Lance ensuite **Oracle VirtualBox** depuis le menu des applications : **Aide → À propos de VirtualBox** affiche la version installée.
 
 ## 4. Créer les deux réseaux Host-only
 
-VirtualBox pour Linux limite les plages Host-only autorisées. Déclare les deux réseaux du lab :
+VirtualBox pour Linux n’accepte que certaines plages pour les réseaux Host-only. Déclare d’abord les deux réseaux du lab, dans un terminal :
 
 ```bash
 sudo mkdir -p /etc/vbox
 echo "* 192.168.56.0/24 192.168.57.0/24" | sudo tee /etc/vbox/networks.conf
 ```
 
-Si ce fichier existait déjà avec d’autres plages, ajoute-les sur la même ligne au lieu de les écraser.
+Si ce fichier existait déjà avec d’autres plages, ajoute-les sur la même ligne au lieu de les écraser. Sans ce fichier, VirtualBox refuse l’adresse `192.168.57.1`.
 
-Crée les deux interfaces, puis donne-leur leur adresse :
+Dans VirtualBox : **Fichier → Outils → Gestionnaire de réseau**, onglet **Réseaux privés hôte**. Clique deux fois sur **Créer** : VirtualBox crée `vboxnet0` puis `vboxnet1`. Pour chacun, sélectionne-le et configure :
 
-```bash
-VBoxManage hostonlyif create
-VBoxManage hostonlyif create
-```
+| Paramètre | `vboxnet0` : gestion | `vboxnet1` : instances |
+|---|---|---|
+| Onglet **Adaptateur** | **Configurer l’adaptateur manuellement** | **Configurer l’adaptateur manuellement** |
+| Adresse IPv4 | `192.168.56.1` | `192.168.57.1` |
+| Masque réseau IPv4 | `255.255.255.0` | `255.255.255.0` |
+| Onglet **Serveur DHCP** | **Activer le serveur** décoché | **Activer le serveur** décoché |
 
-```bash
-VBoxManage hostonlyif ipconfig vboxnet0 --ip 192.168.56.1 --netmask 255.255.255.0
-VBoxManage hostonlyif ipconfig vboxnet1 --ip 192.168.57.1 --netmask 255.255.255.0
-```
+Clique sur **Appliquer** après chaque réseau.
 
-Vérifie qu’aucun serveur DHCP VirtualBox n’est actif sur ces réseaux :
-
-```bash
-VBoxManage list hostonlyifs | grep -E "^Name|IPAddress|DHCP"
-VBoxManage list dhcpservers
-```
-
-Si un serveur DHCP est listé pour `vboxnet0` ou `vboxnet1`, supprime-le :
-
-```bash
-VBoxManage dhcpserver remove --interface=vboxnet0
-```
-
-Les noms `vboxnet0` et `vboxnet1` supposent qu’aucun réseau Host-only n’existait avant. Sinon, repère chaque interface par son adresse IP, pas par son numéro, et adapte les étapes suivantes.
+Si des réseaux Host-only existaient déjà, les numéros seront différents : **repère chaque réseau par son adresse IP, pas par son nom**.
 
 ## 5. Importer les deux OVA
 
-L’option `keepallmacs` conserve **toutes** les adresses MAC : dans les VM, netplan reconnaît les cartes 2 et 3 par leur MAC.
+**Fichier → Importer un appareil virtuel** :
 
-```bash
-cd ~/Lab-OpenStack
-VBoxManage import Services-base.ova --vsys 0 --vmname Lab-Services --options keepallmacs
-VBoxManage import Sunbeam-base.ova --vsys 0 --vmname Lab-Sunbeam --options keepallmacs
-```
-
-Ajoute `--basefolder /chemin/vers/le/ssd` sur les deux commandes pour choisir l’emplacement des disques.
+1. Sélectionne `~/Lab-OpenStack/Services-base.ova`.
+2. Nomme la VM **`Lab-Services`**.
+3. Choisis le **dossier de base** sur le SSD.
+4. **Politique d’adresse MAC** : **Inclure toutes les adresses MAC des cartes réseau**. N’utilise pas « uniquement les cartes NAT » : dans les VM, netplan reconnaît les cartes 2 et 3 par leur MAC.
+5. Clique sur **Terminer**.
+6. Recommence avec `Sunbeam-base.ova`, nommée **`Lab-Sunbeam`**.
 
 **Ne démarre pas encore les VM.**
 
 ## 6. Brancher les cartes réseau
 
-```bash
-for vm in Lab-Services Lab-Sunbeam; do
-  VBoxManage modifyvm "$vm" \
-    --nic1 nat --cable-connected1 on \
-    --nic2 hostonly --host-only-adapter2 vboxnet0 --nic-promisc2 allow-all --cable-connected2 on \
-    --nic3 hostonly --host-only-adapter3 vboxnet1 --nic-promisc3 allow-all --cable-connected3 on
-done
-```
+Pour **chacune des deux VM** : sélectionne-la, puis **Configuration → Réseau**.
 
-Le mode promiscuité « allow-all » est nécessaire : les IP des API OpenStack et des instances Nova utilisent d’autres MAC que celles des cartes.
+| Carte | Mode d’accès réseau | Nom |
+|---|---|---|
+| Adaptateur 1 | **NAT** | — |
+| Adaptateur 2 | **Réseau privé hôte** | Le réseau `192.168.56.1` (`vboxnet0`) |
+| Adaptateur 3 | **Réseau privé hôte** | Le réseau `192.168.57.1` (`vboxnet1`) |
 
-Vérifie les MAC et les branchements :
+Sur les trois cartes : **Activer l’interface réseau** coché. Dans **Avancé** : **Câble branché** coché, type de carte et adresse MAC inchangés.
 
-```bash
-for vm in Lab-Services Lab-Sunbeam; do
-  echo "== $vm"
-  VBoxManage showvminfo "$vm" --machinereadable | grep -E '^(nic[123]|hostonlyadapter[23]|macaddress[23])='
-done
-```
+Sur les adaptateurs **2 et 3**, dans **Avancé**, règle **Mode promiscuité : Tout autoriser** : les IP des API OpenStack et des instances Nova utilisent d’autres MAC que celles des cartes.
 
-| VM | `macaddress2` | `macaddress3` |
+Toujours dans **Avancé**, vérifie l’**adresse MAC** des cartes 2 et 3 :
+
+| VM | Adaptateur 2 | Adaptateur 3 |
 |---|---|---|
 | Lab-Services | `080027560020` | `080027570002` |
 | Lab-Sunbeam | `080027560010` | `080027570010` |
 
-Si les MAC diffèrent, supprime la VM et réimporte-la avec `--options keepallmacs`.
+Si les MAC diffèrent, supprime la VM (**Supprimer → Supprimer tous les fichiers**) et réimporte-la en choisissant la bonne politique MAC.
 
 ## 7. Activer la virtualisation imbriquée de Lab-Sunbeam
 
-```bash
-VBoxManage modifyvm Lab-Sunbeam --nested-hw-virt on
-VBoxManage showvminfo Lab-Sunbeam --machinereadable | grep -E '^(nested-hw-virt|memory|cpus)='
-```
+VM **Lab-Sunbeam éteinte** : **Configuration → Système**.
 
-Attendu : `nested-hw-virt="on"`, `memory=20480`, `cpus=8`.
+1. Onglet **Carte mère** : vérifie **20480 Mo** de mémoire vive.
+2. Onglet **Processeur** : vérifie **8** processeurs et coche **Activer VT-x/AMD-V imbriqué**.
 
 ## 8. Démarrer les VM
 
 ### 8.1 Lab-Services d’abord
 
-```bash
-VBoxManage startvm Lab-Services --type headless
-```
+Sélectionne **Lab-Services** et clique sur **Démarrer**. La console de la VM s’ouvre dans une fenêtre ; tu peux t’y connecter avec `vagrant`, ou utiliser SSH depuis un terminal de l’hôte.
 
 Attends une minute, puis :
 
@@ -239,17 +209,16 @@ exit
 
 ### 8.2 Lab-Sunbeam ensuite
 
-```bash
-VBoxManage startvm Lab-Sunbeam --type headless
-```
+Sélectionne **Lab-Sunbeam** et clique sur **Démarrer**.
 
-Si le démarrage échoue avec `VERR_VMX_IN_VMX_ROOT_MODE`, KVM occupe VT-x : reprends l’étape 2. Vérifie le moteur utilisé par VirtualBox :
+Si VirtualBox affiche une erreur `VERR_VMX_IN_VMX_ROOT_MODE`, KVM occupe VT-x : reprends l’étape 2.
 
-```bash
-grep -E "HMR3Init|nested-guest" ~/"VirtualBox VMs/Lab-Sunbeam/Logs/VBox.log"
-```
+Vérifie le moteur utilisé par VirtualBox : clic droit sur **Lab-Sunbeam → Afficher le journal**, onglet `VBox.log`, puis recherche `HMR3Init` (champ de recherche en bas de la fenêtre).
 
-Attendu : `VT-x w/ nested paging and unrestricted guest execution hw support` et `VT-x nested-guest init`. Adapte le chemin si tu as utilisé `--basefolder`.
+| Résultat | Signification |
+|---|---|
+| `VT-x w/ nested paging and unrestricted guest execution hw support`, et plus bas `VT-x nested-guest init` | ✅ Configuration correcte |
+| Pas de `nested-guest init` | ❌ Case **VT-x/AMD-V imbriqué** non cochée : éteins la VM et reprends l’étape 7 |
 
 Puis :
 
@@ -421,27 +390,14 @@ Les règles du groupe de sécurité autorisent `192.168.57.1/32` : c’est l’a
 En fin de séance :
 
 1. Arrête les instances Nova (Horizon ou `openstack server stop`).
-2. Arrête Lab-Sunbeam, attends son arrêt complet, puis Lab-Services :
+2. Dans **Lab-Sunbeam** : `sudo shutdown -h now`. Dans VirtualBox, attends que la VM passe à l’état **Éteinte**.
+3. Dans **Lab-Services** : `sudo shutdown -h now`.
 
-```bash
-VBoxManage controlvm Lab-Sunbeam acpipowerbutton
-VBoxManage list runningvms
-```
+Tu peux aussi utiliser, dans la fenêtre de la VM, **Machine → Extinction par ACPI**. N’utilise pas **Éteindre** (coupure brutale) : les services OpenStack et Ceph doivent s’arrêter proprement.
 
-```bash
-VBoxManage controlvm Lab-Services acpipowerbutton
-```
+Pour reprendre : **Services d’abord, Sunbeam ensuite**, puis attends 10 à 15 minutes et refais l’étape 10.1.
 
-Tu peux aussi lancer `sudo shutdown -h now` dans chaque VM. Pour reprendre : **Services d’abord, Sunbeam ensuite**, puis attends 10 à 15 minutes et refais l’étape 10.1.
-
-Après la première validation complète, crée un snapshot des **deux VM éteintes** :
-
-```bash
-VBoxManage snapshot Lab-Services take Base-importee-validee
-VBoxManage snapshot Lab-Sunbeam take Base-importee-validee
-```
-
-Pour revenir à cette base : `VBoxManage snapshot <VM> restore Base-importee-validee` sur les deux VM éteintes.
+Après la première validation complète, crée un snapshot des **deux VM éteintes** : sélectionne la VM, bouton de menu à droite de son nom → **Instantanés** → **Prendre**, nommé par exemple `Base-importee-validee`. Pour revenir à cette base, restaure l’instantané des **deux** VM, éteintes.
 
 ---
 
@@ -451,7 +407,7 @@ Pour revenir à cette base : `VBoxManage snapshot <VM> restore Base-importee-val
 |---|---|---|
 | `VERR_VMX_IN_VMX_ROOT_MODE` au démarrage d’une VM | KVM de l’hôte occupe VT-x | 2 |
 | `VERR_VMX_NO_VMX` ou `grep -c vmx` = 0 | VT-x désactivé, ou hôte virtuel sans virtualisation imbriquée | 1 |
-| `hostonlyif ipconfig` refusé (« Code E_ACCESSDENIED ») | Plage absente de `/etc/vbox/networks.conf` | 4 |
+| Adresse `192.168.57.1` refusée dans le Gestionnaire de réseau (« E_ACCESSDENIED ») | Plage absente de `/etc/vbox/networks.conf` | 4 |
 | Module `vboxdrv` absent après installation | Clé MOK non enrôlée (Secure Boot) | 3 |
 | `mgmt0` ou `provider0` absente, IP manquantes | MAC non conservées à l’import, ou carte sur le mauvais `vboxnet` | 5 et 6 |
 | Horizon 503 ou ne répond pas juste après le démarrage | Services encore en cours de démarrage | Attendre 10 à 15 min |

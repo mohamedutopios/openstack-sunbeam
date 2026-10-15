@@ -244,11 +244,12 @@ Sur les trois cartes : **Activer l’interface réseau** et **Câble branché** 
 
 ## 7. Activer la virtualisation imbriquée de Lab-Sunbeam
 
-VM **éteinte** : **Configuration → Système → Processeur**, coche **Activer VT-x/AMD-V imbriqué** et vérifie 20 Go de RAM et 8 processeurs. Ou en PowerShell :
+VM **Lab-Sunbeam éteinte** : **Configuration → Système**.
 
-```powershell
-& "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe" modifyvm "Lab-Sunbeam" --nested-hw-virt on
-```
+1. Onglet **Carte mère** : vérifie **20480 Mo** de mémoire vive.
+2. Onglet **Processeur** : vérifie **8** processeurs et coche **Activer VT-x/AMD-V imbriqué**.
+
+Si la case est grisée, l’hyperviseur Windows est encore actif : reprends l’étape 2.
 
 ## 8. Démarrer les VM
 
@@ -276,17 +277,13 @@ sudo docker ps --format "{{.Names}} {{.Status}}"
 
 ### 8.2 Lab-Sunbeam ensuite
 
-Démarre **Lab-Sunbeam**. Dès qu’elle a démarré, vérifie dans PowerShell que VirtualBox utilise bien VT-x et pas Hyper-V :
+Sélectionne **Lab-Sunbeam** et clique sur **Démarrer**. Dès qu’elle a démarré, vérifie que VirtualBox utilise bien VT-x et pas Hyper-V : clic droit sur **Lab-Sunbeam → Afficher le journal**, onglet `VBox.log`, puis recherche `HMR3Init` (champ de recherche en bas de la fenêtre).
 
-```powershell
-Select-String -Path "$env:USERPROFILE\VirtualBox VMs\Lab-Sunbeam\Logs\VBox.log" -Pattern "HMR3Init|fall back to NEM|nested-guest"
-```
-
-Adapte le chemin si tu as choisi un autre dossier à l’import.
+Une tortue verte dans la barre d’état de la fenêtre de la VM signale aussi le mode Hyper-V (NEM).
 
 | Résultat | Signification |
 |---|---|
-| `VT-x w/ nested paging and unrestricted guest execution hw support` et `VT-x nested-guest init` | ✅ Configuration correcte |
+| `VT-x w/ nested paging and unrestricted guest execution hw support`, et plus bas `VT-x nested-guest init` | ✅ Configuration correcte |
 | `Attempting fall back to NEM: VT-x is not available` | ❌ L’hyperviseur Windows est actif : éteins les VM et reprends l’étape 2 |
 
 Puis dans la VM :
