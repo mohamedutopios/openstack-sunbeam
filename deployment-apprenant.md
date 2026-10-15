@@ -10,7 +10,7 @@ Dans la console de **chaque VM**, définis un mot de passe connu pour le compte 
 sudo passwd vagrant
 ```
 
-Les apprenants utiliseront ce compte dans la console VirtualBox. La clé SSH créée par Vagrant sur ton PC ne sera pas automatiquement disponible chez eux.
+Les apprenants utiliseront ce compte dans la console VirtualBox, ou en SSH avec ce mot de passe depuis Windows (`ssh vagrant@192.168.56.20` et `ssh vagrant@192.168.56.10`). La clé SSH créée par Vagrant sur ton PC ne sera pas disponible chez eux : `vagrant ssh` ne fonctionnera pas.
 
 Prépare ce dossier à distribuer :
 
@@ -186,11 +186,11 @@ Dans VirtualBox :
 2. Sélectionne `Services-base.ova`.
 3. Nomme la VM **`Lab-Services`**.
 4. Choisis le dossier de stockage sur le SSD.
-5. Pour la politique MAC, sélectionne **Conserver toutes les adresses MAC**.
+5. Pour la politique MAC, sélectionne **Inclure toutes les adresses MAC des cartes réseau** (libellé variable selon la version : l’option qui conserve **toutes** les MAC).
 6. Lance l’import.
 7. Répète avec `Sunbeam-base.ova`, nommée **`Lab-Sunbeam`**.
 
-Oracle distingue bien la conservation de toutes les MAC de celle des seules cartes NAT : il faut ici l’option équivalente à `keepallmacs`. [Oracle VirtualBox](https://www.virtualbox.org/browser/vbox/trunk/doc/manual/en_US/man_VBoxManage-import.xml?rev=87075\&utm_source=chatgpt.com)
+N’utilise pas « Inclure uniquement les adresses MAC des cartes NAT » : il faut l’option équivalente à `keepallmacs`. Dans les VM, netplan reconnaît les cartes 2 et 3 par leur adresse MAC pour créer `mgmt0` et `provider0` ; si les MAC changent, ces interfaces et leurs adresses IP disparaissent. [Oracle VirtualBox](https://www.virtualbox.org/browser/vbox/trunk/doc/manual/en_US/man_VBoxManage-import.xml?rev=87075)
 
 **Ne démarre pas encore les VM.**
 
@@ -229,13 +229,13 @@ Tu peux aussi utiliser PowerShell :
 & "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe" modifyvm "Lab-Sunbeam" --nested-hw-virt on
 ```
 
-Cette option expose la virtualisation matérielle à la VM. [download.virtualbox.org](https://download.virtualbox.org/virtualbox/7.2.0_RC1/UserManual.pdf?utm_source=chatgpt.com)
+Cette option expose la virtualisation matérielle à la VM. [download.virtualbox.org](https://download.virtualbox.org/virtualbox/7.2.0_RC1/UserManual.pdf)
 
 **8. Démarrer les VM dans le bon ordre**
 
 Démarre d’abord **Lab-Services**.
 
-Connecte-toi dans sa console VirtualBox avec `vagrant`, puis vérifie :
+Connecte-toi dans sa console VirtualBox avec `vagrant`, ou depuis Windows avec `ssh vagrant@192.168.56.20`, puis vérifie :
 
 ```bash
 ip -br addr
@@ -246,25 +246,25 @@ sudo docker ps
 
 Tu dois retrouver :
 
-- `192.168.56.20` sur le réseau de gestion ;
-- `192.168.57.2` sur le réseau des instances ;
+- `192.168.56.20` sur `mgmt0`, le réseau de gestion ;
+- `192.168.57.2` sur `provider0`, le réseau des instances (passerelle des instances Nova) ;
 - Docker et dnsmasq actifs ;
-- les conteneurs Keycloak et PostgreSQL démarrés.
+- les conteneurs `keycloak-keycloak-1` et `keycloak-postgres-1` démarrés.
 
 Démarre ensuite **Lab-Sunbeam**.
 
-Dans sa console :
+Dans sa console, ou avec `ssh vagrant@192.168.56.10` :
 
 ```bash
 ip -br addr
 ls -l /dev/kvm
 ```
 
-L’adresse de gestion attendue est **`192.168.56.10`**.
+L’adresse attendue est **`192.168.56.10`** sur `mgmt0`. L’interface `provider0` est `UP` **sans adresse IP** : elle est intégrée à Open vSwitch, **ne lui ajoute pas manuellement une adresse IP**.
 
-**Le fichier `/dev/kvm` doit exister.** S’il est absent, il faut résoudre la virtualisation imbriquée avant de tenter de lancer des instances Nova.
+**Le fichier `/dev/kvm` doit exister.** S’il est absent, VirtualBox tourne probablement au-dessus de l’hyperviseur Windows : vérifie `VBox.log` comme indiqué au point 3.4 avant d’aller plus loin.
 
-L’interface `provider0` peut être intégrée à Open vSwitch : **ne lui ajoute pas manuellement une adresse IP**.
+**Après chaque démarrage, Sunbeam a besoin de 10 à 15 minutes** pour relancer Kubernetes et les services OpenStack. Pendant ce temps, Horizon peut ne pas répondre ou renvoyer une erreur 503 : c’est normal, attends avant de diagnostiquer.
 
 **9. Configurer les noms et les certificats dans Windows**
 
@@ -294,7 +294,7 @@ Les correspondances attendues sont :
 | `internal.lab.test` | `192.168.56.202` |
 | `rgw.lab.test` | `192.168.56.203` |
 
-**Avec nos OVA actuelles, Horizon est encore en HTTP** : un contrôle du port 443 peut échouer tant que le HTTPS OpenStack n’est pas configuré.
+**Avec nos OVA actuelles, Horizon est encore en HTTP.** Le script affiche donc l’avertissement `OpenStack HTTPS inaccessible` sur le port 443 : **c’est attendu** tant que le HTTPS OpenStack n’est pas configuré. Seule la ligne `OK : Keycloak, port 8443 accessible.` doit être verte.
 
 Vérifie plutôt :
 
@@ -315,16 +315,20 @@ Dans **Lab-Sunbeam**, avec l’utilisateur `vagrant` :
 
 ```bash
 juju status -m openstack
-juju status -m openstack-machines
+juju status -m admin/openstack-machines
 ```
 
-Laisse quelques minutes aux services pour reprendre. Vérifie ensuite :
+Le modèle des machines appartient à l’utilisateur Juju `admin` : `juju status -m openstack-machines` renvoie `model ... not found`. La commande `juju models` affiche les noms exacts.
+
+Toutes les applications doivent être `active`. Juste après le démarrage, certaines peuvent rester `blocked` ou `maintenance` quelques minutes, le temps que les `mysql-router` se reconnectent à MySQL.
+
+Vérifie ensuite :
 
 ```bash
 sudo k8s get dns
 ```
 
-Le DNS amont doit contenir **`192.168.56.20`**, conformément à notre correction.
+Le champ `upstream-nameservers` doit contenir **`192.168.56.20`** : Sunbeam utilise le DNS de Lab-Services pour résoudre les noms `*.lab.test`.
 
 Puis :
 
