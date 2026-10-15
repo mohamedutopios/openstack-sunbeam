@@ -16,7 +16,7 @@ Ressources créées :
 | Instance | `web-vm` | Nginx installé par cloud-init |
 | IP publique | IP flottante | Prise dans `192.168.57.100–199` |
 
-**Prérequis :** le lab est démarré et validé (étapes 8 à 10 de `deployment-apprenant.md`) : `Lab-Services`, puis `Lab-Sunbeam`, et `/dev/kvm` présent. Vérifie aussi les trois points ci-dessous avant de lancer une VM.
+**Prérequis :** le lab est démarré et validé (étapes 8 à 10 de `deployment-apprenant-windows.md` ou `deployment-apprenant-ubuntu.md`) : `Lab-Services`, puis `Lab-Sunbeam`, et `/dev/kvm` présent. Vérifie aussi les trois points ci-dessous avant de lancer une VM.
 
 | Contrôle | Où | Commande | Attendu |
 |---|---|---|---|
