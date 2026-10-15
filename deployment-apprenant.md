@@ -60,19 +60,98 @@ Les apprenants n’ont **pas besoin d’installer Vagrant ou Docker dans Windows
 
 Pour ce lab, la virtualisation imbriquée doit fonctionner : Sunbeam doit pouvoir exécuter des VM à l’intérieur de VirtualBox.
 
-Sur un **PC personnel dédié au lab**, si l’hyperviseur Windows pose problème, ouvre PowerShell en administrateur :
+**Prérequis bloquant : l’hyperviseur Windows doit être désactivé.** S’il est actif (Hyper-V, VBS, intégrité de la mémoire, WSL2…), VirtualBox bascule en mode NEM au-dessus d’Hyper-V : la VM Sunbeam devient extrêmement lente, Kubernetes n’arrive plus à démarrer les pods OpenStack, Horizon ne répond pas sur `cloud.lab.test` et `/dev/kvm` est absent. Ce n’est pas seulement un problème pour Nova : **c’est tout le lab qui ne démarre pas**.
+
+**3.1 Vérifier l’état actuel**
+
+Dans PowerShell :
+
+```powershell
+(Get-CimInstance Win32_ComputerSystem).HypervisorPresent
+```
+
+Si le résultat est `False`, passe directement au point 3.4. Si c’est `True`, applique les points 3.2 et 3.3 sur un **PC personnel dédié au lab**.
+
+**3.2 Désactiver l’intégrité de la mémoire**
+
+Ouvre **Sécurité Windows → Sécurité de l’appareil → Isolation du noyau**, puis désactive **Intégrité de la mémoire**. Ne redémarre pas encore.
+
+**3.3 Désactiver VBS, l’hyperviseur et les fonctionnalités Hyper-V**
+
+Ouvre PowerShell **en administrateur**, puis désactive la sécurité basée sur la virtualisation (VBS) :
+
+```powershell
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f
+```
+
+Empêche le lancement de l’hyperviseur au démarrage :
 
 ```powershell
 bcdedit /set hypervisorlaunchtype off
 ```
 
-Puis redémarre Windows. Ce réglage empêche notamment les fonctions reposant sur Hyper-V, comme WSL2, de fonctionner dans ce démarrage. Pour le réactiver ultérieurement :
+Vérifie que la commande affiche `hypervisorlaunchtype Off` :
+
+```powershell
+bcdedit /enum "{current}" | findstr /i hypervisor
+```
+
+Liste les fonctionnalités Windows qui utilisent l’hyperviseur :
+
+```powershell
+dism /online /get-features /format:table | findstr /i "Hyper-V VirtualMachinePlatform HypervisorPlatform Subsystem-Linux Containers DisposableClientVM"
+```
+
+Désactive chaque fonctionnalité marquée **Activé**, en remplaçant le nom si besoin :
+
+```powershell
+dism /online /disable-feature /featurename:Microsoft-Hyper-V-All /norestart
+```
+
+```powershell
+dism /online /disable-feature /featurename:VirtualMachinePlatform /norestart
+```
+
+```powershell
+dism /online /disable-feature /featurename:HypervisorPlatform /norestart
+```
+
+**Redémarre Windows.** Les commandes `bcdedit` et `reg` ne prennent effet qu’après le redémarrage : un contrôle juste après donne encore `True`.
+
+Ces réglages empêchent WSL2, Docker Desktop, Windows Sandbox et Hyper-V de fonctionner. Pour revenir en arrière après la formation :
 
 ```powershell
 bcdedit /set hypervisorlaunchtype auto
 ```
 
-Si les protections VBS d’un PC administré maintiennent des contraintes, fais valider la configuration par l’administrateur. **Le contrôle décisif sera la présence de `/dev/kvm` dans Sunbeam, à l’étape 8.**
+Réactive ensuite les fonctionnalités avec `dism /online /enable-feature /featurename:<nom>`, l’intégrité de la mémoire dans Sécurité Windows, puis redémarre.
+
+**3.4 Contrôler après le redémarrage**
+
+Dans PowerShell, les deux commandes doivent afficher respectivement `False` et `0` :
+
+```powershell
+(Get-CimInstance Win32_ComputerSystem).HypervisorPresent
+```
+
+```powershell
+(Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard).VirtualizationBasedSecurityStatus
+```
+
+Après le premier démarrage de **Lab-Sunbeam** (étape 8), vérifie le moteur utilisé par VirtualBox dans le journal de la VM :
+
+```powershell
+Select-String -Path "$env:USERPROFILE\VirtualBox VMs\Lab-Sunbeam\Logs\VBox.log" -Pattern "HMR3Init|fall back to NEM|nested-guest"
+```
+
+Adapte le chemin si tu as choisi un autre dossier de stockage à l’import.
+
+| Résultat dans `VBox.log` | Signification |
+|---|---|
+| `HM: HMR3Init: VT-x w/ nested paging and unrestricted guest execution hw support` et `CPUM: VT-x nested-guest init` | ✅ VT-x natif et virtualisation imbriquée : la configuration est bonne |
+| `HM: HMR3Init: Attempting fall back to NEM: VT-x is not available` | ❌ L’hyperviseur Windows est toujours actif : éteins les VM et reprends les points 3.2 et 3.3 |
+
+Si `HypervisorPresent` reste à `True` malgré ces réglages, une stratégie d’entreprise (GPO ou Intune) impose probablement VBS : fais valider la configuration par l’administrateur du PC. **Le contrôle décisif reste la présence de `/dev/kvm` dans Sunbeam, à l’étape 8.**
 
 **4. Créer les deux réseaux Host-only**
 
