@@ -431,20 +431,16 @@ Le résultat attendu est `200` suivi de la taille du fichier, en moins d’une s
 
 ### OSD Ceph arrêté après l’import des OVA
 
-VirtualBox attribue un nouvel identifiant au disque Ceph lors de l’import : le numéro de série vu par Linux change et le lien de l’OSD pointe vers un disque qui n’existe plus.
-
-Repère le nouveau nom du disque `sdb` :
+VirtualBox attribue un nouvel identifiant au disque Ceph lors de l’import : si le lien de l’OSD utilise un chemin `/dev/disk/by-id/...`, il pointe ensuite vers un disque qui n’existe plus. Les OVA corrigées utilisent un chemin par port SATA, stable à l’import.
 
 ```bash
-ls -l /dev/disk/by-id/ | grep 'scsi-SATA.*sdb$'
 sudo ls -l /var/snap/microceph/common/data/osd/ceph-1/block
 ```
 
-Si les deux noms diffèrent, fais pointer le lien vers le nouveau nom, puis redémarre l’OSD :
+Si le lien ne pointe pas vers `/dev/disk/by-path/pci-0000:00:1f.2-ata-2`, corrige-le puis redémarre l’OSD :
 
 ```bash
-NEW=$(ls /dev/disk/by-id/ | grep '^scsi-SATA.*' | while read d; do [ "$(readlink -f /dev/disk/by-id/$d)" = /dev/sdb ] && echo "$d"; done)
-sudo ln -sfn "/dev/disk/by-id/$NEW" /var/snap/microceph/common/data/osd/ceph-1/block
+sudo ln -sfn /dev/disk/by-path/pci-0000:00:1f.2-ata-2 /var/snap/microceph/common/data/osd/ceph-1/block
 sudo systemctl reset-failed snap.microceph.osd.service
 sudo snap restart microceph.osd
 sudo ceph -s

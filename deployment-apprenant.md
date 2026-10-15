@@ -322,7 +322,83 @@ Le modèle des machines appartient à l’utilisateur Juju `admin` : `juju statu
 
 Toutes les applications doivent être `active`. Juste après le démarrage, certaines peuvent rester `blocked` ou `maintenance` quelques minutes, le temps que les `mysql-router` se reconnectent à MySQL.
 
-Vérifie ensuite :
+**10.1 Relancer les unités Juju en erreur**
+
+Au démarrage, des hooks peuvent échouer tant que l’API Juju n’est pas joignable. Juju ne les relance pas seul : l’unité reste en `error` et le service correspondant ne fonctionne plus. Par exemple, `keystone-mysql-router` en erreur bloque toute authentification (`HTTP 500` sur `openstack token issue`).
+
+```bash
+juju status -m openstack | grep -w error
+juju status -m admin/openstack-machines | grep -w error
+```
+
+Pour chaque unité affichée, par exemple `keystone-mysql-router/0` :
+
+```bash
+juju resolved -m openstack keystone-mysql-router/0
+```
+
+Attends une minute, puis relance `juju status` : l’unité doit repasser `active`.
+
+**10.2 Ceph**
+
+```bash
+sudo ceph -s | grep -E "osd:|pgs:"
+```
+
+Le résultat attendu est `1 osds: 1 up` et `289 active+clean`. Le `HEALTH_WARN` « pools have no replicas configured » est normal sur un lab à un seul nœud.
+
+Si l’OSD est `0 up`, vérifie la cible de son lien :
+
+```bash
+sudo ls -l /var/snap/microceph/common/data/osd/ceph-1/block
+```
+
+Il doit pointer vers `/dev/disk/by-path/pci-0000:00:1f.2-ata-2`, chemin qui ne change pas à l’import. S’il pointe vers un chemin `/dev/disk/by-id/...` qui n’existe plus, corrige-le :
+
+```bash
+sudo ln -sfn /dev/disk/by-path/pci-0000:00:1f.2-ata-2 /var/snap/microceph/common/data/osd/ceph-1/block
+sudo systemctl reset-failed snap.microceph.osd.service
+sudo snap restart microceph.osd
+```
+
+Sans Ceph, Glance ne peut pas fournir les images et le lancement des instances échoue (`HTTP 502` côté Nova).
+
+**10.3 KVM imbriqué sans EPT**
+
+```bash
+cat /sys/module/kvm_intel/parameters/ept
+```
+
+Le résultat attendu est `N`. Le fichier `/etc/modprobe.d/kvm-intel-ept.conf` des OVA le fixe : avec EPT actif, KVM dans VirtualBox corrompt la mémoire des instances, qui plantent au démarrage (`Kernel panic`, `BUG: kernel NULL pointer dereference` dans `openstack console log show`).
+
+Si le résultat est `Y`, aucune instance ne doit tourner :
+
+```bash
+echo "options kvm_intel ept=0" | sudo tee /etc/modprobe.d/kvm-intel-ept.conf
+sudo modprobe -r kvm_intel && sudo modprobe kvm_intel
+```
+
+Ce réglage concerne les processeurs Intel. Sur un PC AMD, le fichier `/sys/module/kvm_intel` n’existe pas : signale-le au formateur.
+
+**10.4 MTU du réseau des instances**
+
+Dans **Lab-Services** :
+
+```bash
+ip link show provider0 | grep -o "mtu [0-9]*"
+```
+
+Le résultat attendu est `mtu 1442`, fixé dans `/etc/netplan/60-lab.yaml`. Avec une MTU de 1500, le NAT VirtualBox renvoie des paquets trop gros pour le réseau des instances : le ping fonctionne, mais `apt` et HTTPS restent bloqués dans les VM Nova.
+
+Si le résultat est `mtu 1500`, ajoute `mtu: 1442` sous `provider0` dans `/etc/netplan/60-lab.yaml`, puis :
+
+```bash
+sudo netplan apply
+```
+
+**10.5 DNS de Kubernetes**
+
+Dans **Lab-Sunbeam** :
 
 ```bash
 sudo k8s get dns
@@ -330,7 +406,7 @@ sudo k8s get dns
 
 Le champ `upstream-nameservers` doit contenir **`192.168.56.20`** : Sunbeam utilise le DNS de Lab-Services pour résoudre les noms `*.lab.test`.
 
-Puis :
+**10.6 API OpenStack**
 
 ```bash
 source ~/demo-openrc
