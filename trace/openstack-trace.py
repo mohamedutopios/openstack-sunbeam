@@ -562,6 +562,8 @@ def describe_row(table, cols):
     return ""
 
 
+# Colonnes de Port_Binding ecrites par ovn-controller (hyperviseur), et non par ovn-northd.
+CONTROLLER_COLUMNS = {"chassis", "up", "encap", "additional_chassis", "additional_encap", "virtual_parent"}
 IGNORED_CHANGES = {"_version", "nb_cfg", "nb_cfg_timestamp", "external_ids", "hv_cfg", "hv_cfg_timestamp",
                    "options"}
 
@@ -590,12 +592,15 @@ def ovsdb_handler(db, tables, src, dst):
                 continue
             cols = {h: ovsdb_value(v) for h, v in raw.items()}
             what = describe_row(table, cols)
+            writer = src
             if action == "new":
                 diff, previous["changed"] = previous["changed"], set()
                 if not diff:
                     continue  # compteurs ou identifiants internes seulement
                 what += " : " + ", ".join(f"{k}={str(cols.get(k))[:40]}" for k in sorted(diff))
-            emit("ovn", src, dst, f"{table} : {ACTIONS.get(action, action)} {what}".strip(),
+                if table == "Port_Binding" and diff & CONTROLLER_COLUMNS:
+                    writer = "ovn-controller"  # l'hyperviseur declare qu'il prend le port en charge
+            emit("ovn", writer, dst, f"{table} : {ACTIONS.get(action, action)} {what}".strip(),
                  detail=f"Base {db}" + (f", ligne {row_id}" if row_id else ""))
     return handle
 

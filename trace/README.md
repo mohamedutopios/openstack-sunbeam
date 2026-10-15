@@ -2,8 +2,12 @@
 
 Ce dossier contient un **traceur en temps réel** des échanges internes d’OpenStack (API REST, RPC RabbitMQ, SQL MySQL, OVN, hyperviseur, Ceph) et les **commandes manuelles** pour observer chacun de ces canaux. Il sert à montrer aux apprenants ce qui se passe « derrière » une commande `openstack`, en particulier pendant le scénario `demo/README.md`.
 
+**Pour une démonstration, suis `PAS-A-PAS.md`** : où taper chaque commande, dans quel ordre, et ce qu’il faut montrer à chaque étape.
+
 | Fichier | Rôle |
 |---|---|
+| `PAS-A-PAS.md` | Déroulé complet de la démonstration, étape par étape |
+| `scenario-demo.sh` | Scénario demo web guidé (Entrée avant chaque étape, marqueurs posés automatiquement) et nettoyage (`nettoyer`) |
 | `openstack-trace.py` | Collecteur : lit les sources et publie les événements (Python 3, bibliothèque standard) |
 | `index.html` | Page temps réel : schéma animé et fil des échanges |
 | `start.sh` / `stop.sh` | Démarrage en arrière-plan et arrêt propre |
@@ -62,7 +66,7 @@ Le journal du traceur est dans `~/trace/trace.log`. L’option `-v` (`bash ~/tra
 | **RPC** | API de gestion RabbitMQ (`192.168.56.211:15672`) | Qui publie (nom du processus oslo.messaging) et sur quelle file (`conductor`, `scheduler`, `compute.sunbeam`, `q-plugin`…) |
 | **SQL** | `performance_schema` de MySQL | Nombre de `SELECT`, `INSERT`, `UPDATE`, `DELETE` par base (`neutron_server`, `nova`, `nova_api`, `placement_api`, `keystone`…) |
 | **OVN Northbound** | `ovsdb-client monitor` | Traduction des objets Neutron : `Logical_Switch`, `Logical_Router`, `Logical_Switch_Port`, `ACL`, `Port_Group`, `NAT`, `DHCP_Options` |
-| **OVN Southbound** | `ovsdb-client monitor` | Travail d’`ovn-northd` : `Datapath_Binding`, `Port_Binding` (avec le `chassis` de l’hyperviseur) |
+| **OVN Southbound** | `ovsdb-client monitor` | Écritures d’`ovn-northd` (`Datapath_Binding`, `Port_Binding`) et d’`ovn-controller` (`chassis` et `up` d’un `Port_Binding`, quand l’hyperviseur prend le port en charge) |
 | **ovn-controller** | Fichier `/var/snap/openstack-hypervisor/common/log/ovn/ovn-controller.log` | `Claiming lport`, `ovn-installed in OVS`, `up in Southbound` |
 | **Services Nova** | Journaux de `nova-compute`, `nova-scheduler`, `nova-conductor`, agent metadata | Messages liés à une requête : `Claim successful`, `Creating image(s)`, `Took … seconds to spawn` |
 | **libvirt** | `virsh event --all --loop` | Cycle de vie de la VM : `Defined`, `Started`, `Paused`, `Resumed` |
