@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traceur OpenStack</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --muted: #667085; --line: #d8dde6;
+  --node: #ffffff; --node-ink: #1d2330; --zone: #eef1f6; --zone-ink: #7a8599;
+  --api: #2563eb; --rpc: #ea7a0c; --db: #8b3fd9; --ovn: #16a34a; --compute: #0d9488;
+  --libvirt: #dc2626; --ceph: #a16207; --mark: #475467;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --panel: #181d26; --ink: #e6e9ef; --muted: #98a2b3; --line: #2b3240;
+    --node: #1f2531; --node-ink: #e6e9ef; --zone: #1a202a; --zone-ink: #7d879a;
+    --api: #60a5fa; --rpc: #fb923c; --db: #c084fc; --ovn: #4ade80; --compute: #2dd4bf;
+    --libvirt: #f87171; --ceph: #fbbf24; --mark: #98a2b3;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #181d26; --ink: #e6e9ef; --muted: #98a2b3; --line: #2b3240;
+  --node: #1f2531; --node-ink: #e6e9ef; --zone: #1a202a; --zone-ink: #7d879a;
+  --api: #60a5fa; --rpc: #fb923c; --db: #c084fc; --ovn: #4ade80; --compute: #2dd4bf;
+  --libvirt: #f87171; --ceph: #fbbf24; --mark: #98a2b3;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+#status { font-size: 12px; color: var(--muted); }
+#status.ok::before { content: "● "; color: var(--ovn); }
+#status.ko::before { content: "● "; color: var(--libvirt); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 999px;
+  padding: 3px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.chip.off { opacity: .35; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
+button, input[type=text] { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--api); border-color: var(--api); color: #fff; }
+label.check { font-size: 13px; display: inline-flex; gap: 5px; align-items: center; }
+main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr); gap: 12px; padding: 12px 16px; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+.panel h2 span { margin-left: auto; text-transform: none; letter-spacing: 0; }
+svg { display: block; width: 100%; height: auto; }
+.zone rect { fill: var(--zone); }
+.zone text { fill: var(--zone-ink); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.node rect { fill: var(--node); stroke: var(--line); stroke-width: 1.2; transition: stroke .3s; }
+.node text { fill: var(--node-ink); font-size: 12.5px; text-anchor: middle; pointer-events: none; }
+.node text.count { fill: var(--muted); font-size: 10px; }
+.node { cursor: pointer; }
+.node.flash rect { stroke-width: 2.5; }
+.node.selected rect { stroke: var(--api); stroke-width: 2.5; }
+.edge { fill: none; stroke-opacity: .45; }
+.edge-label { font-size: 10px; fill: var(--muted); }
+#timeline { height: calc(100vh - 150px); min-height: 420px; overflow-y: auto; font-size: 12.5px; }
+.ev { display: grid; grid-template-columns: 84px 64px minmax(0, 1fr); gap: 8px; padding: 5px 12px;
+  border-bottom: 1px solid var(--line); align-items: start; }
+.ev:hover { background: var(--zone); }
+.ev time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge { font-size: 10.5px; font-weight: 600; text-transform: uppercase; border-radius: 4px; padding: 1px 6px;
+  color: #fff; text-align: center; }
+.ev .who { font-weight: 600; }
+.ev .what { overflow-wrap: anywhere; }
+.ev .req { font-family: ui-monospace, Consolas, monospace; font-size: 11px; border-radius: 4px; padding: 0 5px;
+  cursor: pointer; margin-left: 6px; color: #fff; }
+.ev details { color: var(--muted); font-size: 11.5px; }
+.ev.mark { display: block; background: var(--zone); font-weight: 600; color: var(--mark);
+  border-left: 4px solid var(--mark); }
+#filterbar { font-size: 12px; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--line); display: none; }
+#filterbar button { font-size: 11px; padding: 1px 6px; margin-left: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 12px; font-size: 12px; color: var(--muted);
+  border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Traceur OpenStack</h1>
+  <span id="status" class="ko">connexion…</span>
+  <div class="chips" id="chips"></div>
+  <div class="tools">
+    <label class="check"><input type="checkbox" id="noise" checked> Masquer le bruit de fond</label>
+    <input type="text" id="markText" placeholder="Étape, ex. Création du réseau" size="26">
+    <button class="primary" id="markBtn">Marquer l’étape</button>
+    <button id="pauseBtn">Pause</button>
+    <button id="clearBtn">Effacer</button>
+    <button id="themeBtn" title="Thème clair ou sombre">◐</button>
+  </div>
+</header>
+<main>
+  <section class="panel">
+    <h2>Architecture et échanges <span id="edgeInfo"></span></h2>
+    <svg id="map" viewBox="0 0 1000 640" role="img" aria-label="Schéma des composants OpenStack et de leurs échanges"></svg>
+    <div class="legend">
+      Un point circule pour chaque échange. L’épaisseur d’un lien augmente avec le nombre d’échanges.
+      Clique sur un composant pour filtrer le fil.
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Fil des échanges <span id="counter">0 événement</span></h2>
+    <div id="filterbar"></div>
+    <div id="timeline"></div>
+  </section>
+</main>
+<script>
+try { const t = localStorage.getItem("trace-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+const KINDS = {
+  api: "API REST", rpc: "RPC (RabbitMQ)", db: "SQL (MySQL)", ovn: "OVN",
+  compute: "Services Nova", libvirt: "libvirt / KVM", ceph: "Ceph"
+};
+const NODES = {
+  client:           { x: 70,  y: 300, label: "Client (CLI, Horizon)" },
+  keystone:         { x: 270, y: 70,  label: "Keystone" },
+  "nova-api":       { x: 270, y: 150, label: "Nova API" },
+  neutron:          { x: 270, y: 300, label: "Neutron" },
+  glance:           { x: 270, y: 380, label: "Glance" },
+  placement:        { x: 270, y: 230, label: "Placement" },
+  cinder:           { x: 270, y: 460, label: "Cinder" },
+  horizon:          { x: 70,  y: 380, label: "Horizon" },
+  "nova-scheduler": { x: 480, y: 70,  label: "Nova Scheduler" },
+  "nova-conductor": { x: 480, y: 150, label: "Nova Conductor" },
+  rabbitmq:         { x: 480, y: 240, label: "RabbitMQ" },
+  mysql:            { x: 480, y: 330, label: "MySQL" },
+  "ovn-nb":         { x: 480, y: 430, label: "OVN Northbound" },
+  "ovn-northd":     { x: 480, y: 510, label: "ovn-northd" },
+  "ovn-sb":         { x: 480, y: 590, label: "OVN Southbound" },
+  "nova-compute":   { x: 730, y: 150, label: "nova-compute" },
+  libvirt:          { x: 730, y: 240, label: "libvirt / KVM" },
+  "ovn-controller": { x: 730, y: 430, label: "ovn-controller" },
+  metadata:         { x: 730, y: 510, label: "Agent metadata" },
+  ceph:             { x: 920, y: 380, label: "Ceph" },
+  "cinder-volume":  { x: 920, y: 460, label: "cinder-volume" },
+  "reponse RPC":    { x: 920, y: 240, label: "Réponses RPC" },
+  notifications:    { x: 920, y: 150, label: "Notifications" }
+};
+const ZONES = [
+  { x: 10,  y: 30, w: 120, h: 590, label: "Clients" },
+  { x: 180, y: 30, w: 180, h: 470, label: "API (pods)" },
+  { x: 390, y: 30, w: 180, h: 340, label: "Contrôle et données" },
+  { x: 390, y: 390, w: 180, h: 230, label: "Réseau OVN" },
+  { x: 640, y: 110, w: 180, h: 440, label: "Hyperviseur (hôte Sunbeam)" },
+  { x: 850, y: 110, w: 140, h: 390, label: "Autres" }
+];
+const NODE_W = 150, NODE_H = 38;
+const svg = document.getElementById("map");
+const NS = "http://www.w3.org/2000/svg";
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const color = kind => css("--" + kind) || css("--mark");
+let extraY = 560;
+const edges = {}, nodeEls = {}, counts = {};
+const state = { kinds: new Set(Object.keys(KINDS)), hideNoise: true, paused: false, req: null, node: null };
+const events = [];
+const seen = new Set();
+const pending = [];
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const gZones = el("g", {}, svg), gEdges = el("g", {}, svg), gDots = el("g", {}, svg), gNodes = el("g", {}, svg);
+const defs = el("defs", {}, svg);
+for (const z of ZONES) {
+  const g = el("g", { class: "zone" }, gZones);
+  el("rect", { x: z.x, y: z.y, width: z.w, height: z.h, rx: 10 }, g);
+  el("text", { x: z.x + 10, y: z.y + 16 }, g).textContent = z.label;
+}
+function ensureNode(id) {
+  if (!id) return null;
+  if (!NODES[id]) {
+    NODES[id] = { x: 920, y: extraY, label: id };
+    extraY = extraY >= 600 ? 540 : extraY + 40;
+  }
+  if (!nodeEls[id]) {
+    const n = NODES[id];
+    const g = el("g", { class: "node", transform: `translate(${n.x - NODE_W / 2},${n.y - NODE_H / 2})` }, gNodes);
+    el("rect", { width: NODE_W, height: NODE_H, rx: 8 }, g);
+    el("text", { x: NODE_W / 2, y: 17 }, g).textContent = n.label;
+    const c = el("text", { x: NODE_W / 2, y: 31, class: "count" }, g);
+    g.addEventListener("click", () => setNodeFilter(state.node === id ? null : id));
+    nodeEls[id] = { g, c };
+    counts[id] = 0;
+  }
+  return NODES[id];
+}
+Object.keys(NODES).forEach(ensureNode);
+
+function arrowFor(kind) {
+  const id = "arrow-" + kind;
+  if (!document.getElementById(id)) {
+    const m = el("marker", { id, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+    el("path", { d: "M0,0 L10,5 L0,10 z", fill: color(kind) }, m);
+  }
+  return `url(#${id})`;
+}
+function edgeGeometry(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const clip = (ux, uy) => Math.min(Math.abs((NODE_W / 2 + 2) / (ux || 1e-9)), Math.abs((NODE_H / 2 + 2) / (uy || 1e-9)));
+  const s = clip(ux, uy);
+  const x1 = a.x + ux * s, y1 = a.y + uy * s, x2 = b.x - ux * s, y2 = b.y - uy * s;
+  const bend = 18, mx = (x1 + x2) / 2 - uy * bend, my = (y1 + y2) / 2 + ux * bend;
+  return { d: `M${x1},${y1} Q${mx},${my} ${x2},${y2}`, x1, y1, x2, y2, mx, my };
+}
+function selfGeometry(a) {
+  const x = a.x + NODE_W / 2, y = a.y;
+  return { d: `M${x},${y - 8} C${x + 40},${y - 30} ${x + 40},${y + 30} ${x},${y + 8}`, self: true, x, y };
+}
+function edgeFor(ev) {
+  const key = ev.src + "→" + ev.dst + "|" + ev.kind;
+  if (!edges[key]) {
+    const a = ensureNode(ev.src), b = ensureNode(ev.dst);
+    const geo = ev.src === ev.dst ? selfGeometry(a) : edgeGeometry(a, b);
+    const path = el("path", { d: geo.d, class: "edge", stroke: color(ev.kind), "stroke-width": 1.5,
+      "marker-end": geo.self ? "" : arrowFor(ev.kind) }, gEdges);
+    edges[key] = { path, geo, n: 0, kind: ev.kind };
+  }
+  return edges[key];
+}
+let dots = 0;
+function animate(edge, kind) {
+  if (dots > 80) return;
+  dots++;
+  const dot = el("circle", { r: 5, fill: color(kind) }, gDots);
+  const len = edge.path.getTotalLength();
+  const start = performance.now(), dur = 900;
+  function step(t) {
+    const k = Math.min(1, (t - start) / dur);
+    const p = edge.path.getPointAtLength(len * k);
+    dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
+    if (k < 1) requestAnimationFrame(step); else { dot.remove(); dots--; }
+  }
+  requestAnimationFrame(step);
+}
+function flash(id) {
+  const n = nodeEls[id];
+  if (!n) return;
+  counts[id]++;
+  n.c.textContent = counts[id] + " échange" + (counts[id] > 1 ? "s" : "");
+  n.g.classList.add("flash");
+  setTimeout(() => n.g.classList.remove("flash"), 400);
+}
+
+const reqColors = {};
+function reqColor(req) {
+  if (!reqColors[req]) {
+    let h = 0;
+    for (const ch of req) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    reqColors[req] = `hsl(${h} 60% 45%)`;
+  }
+  return reqColors[req];
+}
+const timeline = document.getElementById("timeline");
+function visible(ev) {
+  if (ev.kind === "mark") return true;
+  if (!state.kinds.has(ev.kind)) return false;
+  if (state.hideNoise && ev.noise) return false;
+  if (state.req && ev.req !== state.req) return false;
+  if (state.node && ev.src !== state.node && ev.dst !== state.node) return false;
+  return true;
+}
+function label(id) { return (NODES[id] && NODES[id].label) || id; }
+function render(ev) {
+  const row = document.createElement("div");
+  if (ev.kind === "mark") {
+    row.className = "ev mark";
+    row.textContent = `▸ ${new Date(ev.ts * 1000).toLocaleTimeString("fr-FR")} — ${ev.label}`;
+    return row;
+  }
+  row.className = "ev";
+  const t = new Date(ev.ts * 1000);
+  const time = document.createElement("time");
+  time.textContent = t.toLocaleTimeString("fr-FR") + "." + String(t.getMilliseconds()).padStart(3, "0").slice(0, 1);
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.style.background = color(ev.kind);
+  badge.textContent = ev.kind;
+  const body = document.createElement("div");
+  const who = document.createElement("span");
+  who.className = "who";
+  who.textContent = ev.src === ev.dst ? label(ev.src) : `${label(ev.src)} → ${label(ev.dst)}`;
+  const what = document.createElement("div");
+  what.className = "what";
+  what.textContent = ev.label;
+  body.append(who);
+  if (ev.req) {
+    const r = document.createElement("span");
+    r.className = "req";
+    r.style.background = reqColor(ev.req);
+    r.textContent = ev.req.slice(4, 12);
+    r.title = "Filtrer sur la requête " + ev.req;
+    r.addEventListener("click", () => setReqFilter(state.req === ev.req ? null : ev.req));
+    body.append(r);
+  }
+  body.append(what);
+  if (ev.detail) {
+    const d = document.createElement("details");
+    const s = document.createElement("summary");
+    s.textContent = "détail";
+    d.append(s, document.createTextNode(ev.detail));
+    body.append(d);
+  }
+  row.append(time, badge, body);
+  return row;
+}
+function rebuild() {
+  timeline.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (let i = events.length - 1; i >= 0 && frag.childNodes.length < 1500; i--)
+    if (visible(events[i])) frag.appendChild(render(events[i]));
+  timeline.appendChild(frag);
+  updateCounter();
+}
+function updateCounter() {
+  const n = events.filter(e => e.kind !== "mark").length;
+  document.getElementById("counter").textContent = n + " événement" + (n > 1 ? "s" : "");
+}
+function show(ev, live) {
+  if (seen.has(ev.id)) return;
+  seen.add(ev.id);
+  events.push(ev);
+  if (events.length > 8000) events.splice(0, 1000);
+  if (ev.kind !== "mark" && ev.src && ev.dst) {
+    const edge = edgeFor(ev);
+    edge.n++;
+    edge.path.setAttribute("stroke-width", Math.min(9, 1.5 + Math.log2(edge.n + 1)));
+    if (live && visible(ev)) { animate(edge, ev.kind); flash(ev.src); if (ev.dst !== ev.src) flash(ev.dst); }
+  }
+  if (visible(ev)) { timeline.prepend(render(ev)); if (timeline.childNodes.length > 1500) timeline.lastChild.remove(); }
+  updateCounter();
+}
+function setReqFilter(req) { state.req = req; state.node = null; updateFilterBar(); rebuild(); }
+function setNodeFilter(id) {
+  state.node = id; state.req = null;
+  for (const k in nodeEls) nodeEls[k].g.classList.toggle("selected", k === id);
+  updateFilterBar(); rebuild();
+}
+function updateFilterBar() {
+  const bar = document.getElementById("filterbar");
+  const what = state.req ? "requête " + state.req : state.node ? "composant " + label(state.node) : null;
+  bar.style.display = what ? "block" : "none";
+  bar.textContent = what ? "Filtre : " + what : "";
+  if (what) {
+    const b = document.createElement("button");
+    b.textContent = "Retirer le filtre";
+    b.addEventListener("click", () => { setNodeFilter(null); setReqFilter(null); });
+    bar.append(b);
+  }
+}
+
+const chips = document.getElementById("chips");
+for (const [k, name] of Object.entries(KINDS)) {
+  const b = document.createElement("button");
+  b.className = "chip";
+  const dot = document.createElement("i");
+  dot.style.background = color(k);
+  b.append(dot, document.createTextNode(name));
+  b.addEventListener("click", () => {
+    state.kinds.has(k) ? state.kinds.delete(k) : state.kinds.add(k);
+    b.classList.toggle("off", !state.kinds.has(k));
+    rebuild();
+  });
+  chips.append(b);
+}
+document.getElementById("noise").addEventListener("change", e => { state.hideNoise = e.target.checked; rebuild(); });
+document.getElementById("pauseBtn").addEventListener("click", e => {
+  state.paused = !state.paused;
+  e.target.textContent = state.paused ? "Reprendre" : "Pause";
+  if (!state.paused) { pending.splice(0).forEach(ev => show(ev, false)); }
+});
+document.getElementById("clearBtn").addEventListener("click", () => {
+  events.length = 0;
+  for (const k in edges) { edges[k].path.remove(); delete edges[k]; }
+  for (const k in counts) { counts[k] = 0; nodeEls[k].c.textContent = ""; }
+  fetch("clear", { method: "POST" });
+  rebuild();
+});
+function sendMark() {
+  const input = document.getElementById("markText");
+  const text = input.value.trim();
+  if (!text) return;
+  fetch("mark", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: text }) });
+  input.value = "";
+}
+document.getElementById("markBtn").addEventListener("click", sendMark);
+document.getElementById("markText").addEventListener("keydown", e => { if (e.key === "Enter") sendMark(); });
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("trace-theme", root.dataset.theme); } catch (e) {}
+  location.reload();
+});
+
+function connect() {
+  const status = document.getElementById("status");
+  const es = new EventSource("events");
+  es.onopen = () => { status.className = "ok"; status.textContent = "en direct"; };
+  es.onerror = () => { status.className = "ko"; status.textContent = "reconnexion…"; };
+  es.onmessage = m => {
+    const ev = JSON.parse(m.data);
+    if (state.paused) pending.push(ev); else show(ev, true);
+  };
+}
+fetch("history").then(r => r.json()).then(list => { list.forEach(ev => show(ev, false)); connect(); })
+  .catch(connect);
+</script>
+</body>
+</html>
