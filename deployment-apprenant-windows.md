@@ -2,7 +2,7 @@
 
 Ce pas à pas installe le lab à partir des deux OVA fournies, `Services-base.ova` et `Sunbeam-base.ova`, sur un **PC Windows 10/11 avec VirtualBox**.
 
-**État validé :** OpenStack fonctionne avec le compte `demo`, une instance Ubuntu avec Nginx a été lancée et jointe en SSH et en HTTP depuis Windows (voir `demo/README.md`). Le SSO Keycloak reste à configurer.
+**État validé :** OpenStack fonctionne avec le compte `demo`, une instance Ubuntu avec Nginx a été lancée et jointe en SSH et en HTTP depuis Windows (voir `1-demo-openstack/demo-vm-openstack.md`). Le SSO Keycloak reste à configurer.
 
 Variante pour un hôte Linux : `deployment-apprenant-ubuntu.md`.
 
@@ -99,7 +99,7 @@ Lab-OpenStack/
   Sunbeam-base.ova
   Configurer-Lab-Sunbeam.ps1
   ca.crt
-  demo/README.md
+  1-demo-openstack/demo-vm-openstack.md
 ```
 
 Le fichier `ca.crt` doit correspondre aux certificats présents dans **ces OVA**. Joins une fiche d’accès :
@@ -110,7 +110,7 @@ Le fichier `ca.crt` doit correspondre aux certificats présents dans **ces OVA**
 | Horizon | Domaine `users`, utilisateur `demo`, mot de passe |
 | Administration Keycloak | `kcadmin` et mot de passe du lab |
 
-**Avant de distribuer à toute la classe, rejoue cette partie B sur un autre PC jusqu’au test `demo/README.md`.**
+**Avant de distribuer à toute la classe, rejoue cette partie B sur un autre PC jusqu’au test `1-demo-openstack/demo-vm-openstack.md`.**
 
 ---
 
@@ -494,7 +494,7 @@ La connexion à Horizon utilise le compte local OpenStack : **la présence de Ke
 
 ## 12. Premier test : une instance Nginx
 
-Suis `demo/README.md` : réseau, routeur, groupe de sécurité, clé SSH, VM Ubuntu avec Nginx, IP flottante, puis SSH et navigateur depuis Windows. C’est le test qui valide le calcul, Ceph et le réseau des instances, au-delà d’Horizon.
+Suis `1-demo-openstack/demo-vm-openstack.md` : réseau, routeur, groupe de sécurité, clé SSH, VM Ubuntu avec Nginx, IP flottante, puis SSH et navigateur depuis Windows. C’est le test qui valide le calcul, Ceph et le réseau des instances, au-delà d’Horizon.
 
 ## 13. Arrêter et conserver le lab
 

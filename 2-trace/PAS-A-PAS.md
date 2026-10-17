@@ -1,6 +1,6 @@
 # Pas à pas : montrer les échanges OpenStack pendant le scénario demo web
 
-Ce pas à pas déroule le scénario `demo/README.md` (réseau, sous-réseau, routeur, groupe de sécurité, clé, VM Nginx, IP flottante) **en affichant en direct** les échanges entre composants OpenStack dans un navigateur. Pour le détail du traceur et les commandes d’observation manuelle : `trace/README.md`.
+Ce pas à pas déroule le scénario `1-demo-openstack/demo-vm-openstack.md` (réseau, sous-réseau, routeur, groupe de sécurité, clé, VM Nginx, IP flottante) **en affichant en direct** les échanges entre composants OpenStack dans un navigateur. Pour le détail du traceur et les commandes d’observation manuelle : `2-trace/README.md`.
 
 ## Où se passe quoi
 
@@ -57,10 +57,10 @@ source ~/demo-openrc && openstack token issue -c expires -f value
 
 ```powershell
 cd C:\Users\<toi>\Documents\formation\openstack-sunbeam
-scp -r .\trace vagrant@192.168.56.10:~/
+scp -r .\2-trace vagrant@192.168.56.10:~/
 ```
 
-Le dossier arrive dans `/home/vagrant/trace` de Lab-Sunbeam. À refaire seulement si les fichiers du dossier `trace` changent.
+Le dossier arrive dans `/home/vagrant/2-trace` de Lab-Sunbeam. À refaire seulement si les fichiers du dossier `2-trace` changent.
 
 ## Étape 2 : créer la clé SSH de la future VM
 
@@ -83,7 +83,7 @@ La clé privée reste sous Windows : c’est elle qui servira à `ssh ubuntu@…
 **Fenêtre B** (Lab-Sunbeam) :
 
 ```bash
-bash ~/trace/start.sh
+bash ~/2-trace/start.sh
 ```
 
 Attendu au bout d’une vingtaine de secondes :
@@ -116,7 +116,7 @@ Deux façons, au choix.
 **Fenêtre B** :
 
 ```bash
-bash ~/trace/scenario-demo.sh
+bash ~/2-trace/scenario-demo.sh
 ```
 
 Le script affiche le titre de l’étape et attend **Entrée**. À chaque Entrée, il pose le marqueur d’étape dans la page, affiche chaque commande (`+ openstack …`) puis l’exécute, et laisse 8 à 15 secondes pour observer. Commente la page, puis Entrée pour l’étape suivante. Ctrl+C arrête le scénario à tout moment.
@@ -245,7 +245,7 @@ openstack keypair create web-key --public-key ~/web-key.pub
 
 ### 6.7 Instance `web-vm`
 
-Le mode guidé crée le fichier `~/nginx-cloud-init.yaml` (Nginx et sa page d’accueil). En mode manuel, crée-le comme indiqué dans `demo/README.md`, étape 9, puis :
+Le mode guidé crée le fichier `~/nginx-cloud-init.yaml` (Nginx et sa page d’accueil). En mode manuel, crée-le comme indiqué dans `1-demo-openstack/demo-vm-openstack.md`, étape 9, puis :
 
 ```bash
 openstack server create web-vm --image ubuntu --flavor m1.web --network web-net --security-group web-sg --key-name web-key --user-data ~/nginx-cloud-init.yaml --wait
@@ -336,7 +336,7 @@ ssh -i "$env:USERPROFILE\.ssh\web-key" ubuntu@192.168.57.1xx
 **Fenêtre B** :
 
 ```bash
-bash ~/trace/scenario-demo.sh nettoyer
+bash ~/2-trace/scenario-demo.sh nettoyer
 ```
 
 Le script supprime l’instance, l’IP flottante, le routeur, le sous-réseau, le réseau, le groupe de sécurité, la clé et le flavor. Le traceur affiche aussi ces suppressions : c’est l’occasion de montrer le chemin inverse.
@@ -344,10 +344,10 @@ Le script supprime l’instance, l’IP flottante, le routeur, le sous-réseau, 
 Puis :
 
 ```bash
-bash ~/trace/stop.sh
+bash ~/2-trace/stop.sh
 ```
 
-**Avant un export des OVA**, supprime aussi le dossier : `rm -rf ~/trace ~/web-key.pub`.
+**Avant un export des OVA**, supprime aussi le dossier : `rm -rf ~/2-trace ~/web-key.pub`.
 
 ---
 
@@ -357,8 +357,8 @@ bash ~/trace/stop.sh
 |---|---|
 | `scenario-demo.sh` : « Cle publique absente » | Refaire l’étape 2 (copie de `web-key.pub`) |
 | `scenario-demo.sh` : « Le traceur ne repond pas » | Refaire l’étape 3 |
-| `scenario-demo.sh` : « Le reseau web-net existe deja » | Un scénario précédent n’a pas été nettoyé : `bash ~/trace/scenario-demo.sh nettoyer` |
-| Page : « reconnexion… » | Traceur arrêté : `tail ~/trace/trace.log` dans B, puis `bash ~/trace/start.sh` |
+| `scenario-demo.sh` : « Le reseau web-net existe deja » | Un scénario précédent n’a pas été nettoyé : `bash ~/2-trace/scenario-demo.sh nettoyer` |
+| Page : « reconnexion… » | Traceur arrêté : `tail ~/2-trace/trace.log` dans B, puis `bash ~/2-trace/start.sh` |
 | Page vide pendant une étape | Case « Masquer le bruit de fond » : la décocher ; vérifier les filtres par canal |
 | Une commande `openstack` répond `HTTP 500` | Unités Juju en erreur : étape 0 |
 | Instance en `ERROR` | `source ~/admin-openrc && openstack server show web-vm -c fault`, puis étapes 10.2 et 10.3 du guide apprenant |

@@ -28,7 +28,7 @@ Services-base.ova
 Sunbeam-base.ova
 Configurer-Lab-Sunbeam.sh
 ca.crt
-demo/README.md
+1-demo-openstack/demo-vm-openstack.md
 ```
 
 ---
@@ -415,7 +415,7 @@ La connexion à Horizon utilise le compte local OpenStack : **la présence de Ke
 
 ## 12. Premier test : une instance Nginx
 
-Suis `demo/README.md`. Les commandes OpenStack sont identiques ; sur l’hôte Ubuntu, remplace les commandes PowerShell par :
+Suis `1-demo-openstack/demo-vm-openstack.md`. Les commandes OpenStack sont identiques ; sur l’hôte Ubuntu, remplace les commandes PowerShell par :
 
 | Action | Commande Ubuntu |
 |---|---|

@@ -1,6 +1,6 @@
 # Tracer les échanges entre composants OpenStack
 
-Ce dossier contient un **traceur en temps réel** des échanges internes d’OpenStack (API REST, RPC RabbitMQ, SQL MySQL, OVN, hyperviseur, Ceph) et les **commandes manuelles** pour observer chacun de ces canaux. Il sert à montrer aux apprenants ce qui se passe « derrière » une commande `openstack`, en particulier pendant le scénario `demo/README.md`.
+Ce dossier contient un **traceur en temps réel** des échanges internes d’OpenStack (API REST, RPC RabbitMQ, SQL MySQL, OVN, hyperviseur, Ceph) et les **commandes manuelles** pour observer chacun de ces canaux. Il sert à montrer aux apprenants ce qui se passe « derrière » une commande `openstack`, en particulier pendant le scénario `1-demo-openstack/demo-vm-openstack.md`.
 
 **Pour une démonstration, suis `PAS-A-PAS.md`** : où taper chaque commande, dans quel ordre, et ce qu’il faut montrer à chaque étape.
 
@@ -21,13 +21,13 @@ Ce dossier contient un **traceur en temps réel** des échanges internes d’Ope
 Depuis Windows, copie le dossier dans Lab-Sunbeam :
 
 ```powershell
-scp -r .\trace vagrant@192.168.56.10:~/
+scp -r .\2-trace vagrant@192.168.56.10:~/
 ```
 
 Dans Lab-Sunbeam (`ssh vagrant@192.168.56.10`) :
 
 ```bash
-bash ~/trace/start.sh
+bash ~/2-trace/start.sh
 ```
 
 Le démarrage prend une vingtaine de secondes (lecture des identifiants par Juju). Ouvre ensuite, depuis Windows :
@@ -37,12 +37,12 @@ Le démarrage prend une vingtaine de secondes (lecture des identifiants par Juju
 Pour arrêter :
 
 ```bash
-bash ~/trace/stop.sh
+bash ~/2-trace/stop.sh
 ```
 
-Le journal du traceur est dans `~/trace/trace.log`. L’option `-v` (`bash ~/trace/start.sh -v`) y écrit aussi chaque événement.
+Le journal du traceur est dans `~/2-trace/trace.log`. L’option `-v` (`bash ~/2-trace/start.sh -v`) y écrit aussi chaque événement.
 
-**Avant d’exporter les OVA**, arrête le traceur et supprime le dossier : `bash ~/trace/stop.sh && rm -rf ~/trace`.
+**Avant d’exporter les OVA**, arrête le traceur et supprime le dossier : `bash ~/2-trace/stop.sh && rm -rf ~/2-trace`.
 
 ## 2. Utiliser la page
 
@@ -84,7 +84,7 @@ Chaque appel API reçoit un identifiant `req-…`. Quand un service en appelle u
 
 ## 4. Ce qu’on observe pendant le scénario demo web
 
-Séquences relevées sur le lab en déroulant `demo/README.md`, bruit de fond masqué.
+Séquences relevées sur le lab en déroulant `1-demo-openstack/demo-vm-openstack.md`, bruit de fond masqué.
 
 | Étape | Enchaînement observé |
 |---|---|
@@ -238,7 +238,7 @@ sudo rbd ls -p glance
 
 | Symptôme | Vérification |
 |---|---|
-| La page ne s’ouvre pas | `bash ~/trace/start.sh` a-t-il affiché « Traceur demarre » ? `ss -ltn \| grep 8099` dans Lab-Sunbeam |
-| « reconnexion… » en haut de la page | Le traceur s’est arrêté : `tail ~/trace/trace.log`, puis `bash ~/trace/start.sh` |
+| La page ne s’ouvre pas | `bash ~/2-trace/start.sh` a-t-il affiché « Traceur demarre » ? `ss -ltn \| grep 8099` dans Lab-Sunbeam |
+| « reconnexion… » en haut de la page | Le traceur s’est arrêté : `tail ~/2-trace/trace.log`, puis `bash ~/2-trace/start.sh` |
 | Aucun événement RPC ni SQL | Unités Juju en erreur ou OpenStack pas encore prêt après démarrage (étape 10.1 du guide apprenant) |
-| Une source se tait | `grep interrompu ~/trace/trace.log` : la source est relancée toutes les 5 secondes |
+| Une source se tait | `grep interrompu ~/2-trace/trace.log` : la source est relancée toutes les 5 secondes |

@@ -1,6 +1,6 @@
 # Le client OpenStack : récupérer des informations, déboguer, diagnostiquer
 
-Ce guide montre comment utiliser la commande `openstack` pour **inventorier** un cloud, **comprendre** ce que fait une commande, et **diagnostiquer** une VM, un volume ou un refus. Il complète les guides `sunbeam-cli/` et `juju-cli/` : `sunbeam` installe et fait évoluer le cloud, `juju` en surveille les services, `openstack` le **consomme** et l’interroge.
+Ce guide montre comment utiliser la commande `openstack` pour **inventorier** un cloud, **comprendre** ce que fait une commande, et **diagnostiquer** une VM, un volume ou un refus. Il complète les guides `3-sunbeam-cli/` et `4-juju-cli/` : `sunbeam` installe et fait évoluer le cloud, `juju` en surveille les services, `openstack` le **consomme** et l’interroge.
 
 Toutes les commandes marquées ✅ ont été **exécutées sur le lab** (client `openstack` 7.5.0, OpenStack 2024.1), avec leur sortie réelle, parfois abrégée. Elles se lancent **dans Lab-Sunbeam** :
 
@@ -33,7 +33,7 @@ openstack --debug image list -f json
 |---|---|---|
 | Aide | `openstack help server create` | Aide d’une commande |
 | Aide | `openstack command list --group openstack.compute.v2` | Commandes d’un service |
-| Identité | `--os-cloud NOM` | Profil d’un `clouds.yaml` (voir `sunbeam-cli/`, § 3.2) |
+| Identité | `--os-cloud NOM` | Profil d’un `clouds.yaml` (voir `3-sunbeam-cli/`, § 3.2) |
 | Identité | `--os-project-name`, `--os-domain-name`, `--os-system-scope all` | Portée du jeton |
 | Ciblage | `--os-interface public\|internal`, `--os-region-name` | Point d’accès du catalogue |
 | Version | `--os-compute-api-version 2.96`, `--os-volume-api-version 3.3` | Microversion d’API |
@@ -461,7 +461,7 @@ openstack volume backend pool list
 
 `cinder-volume` est `down` depuis 12:49 (redémarrage du lab), et aucun pool n’est annoncé.
 
-**3. On passe de l’autre côté, dans Juju** (voir `juju-cli/`, démo 4) :
+**3. On passe de l’autre côté, dans Juju** (voir `4-juju-cli/`, démo 4) :
 
 ```bash
 juju status -m admin/openstack-machines cinder-volume microceph --format short | grep -E "cinder-volume/|microceph/"

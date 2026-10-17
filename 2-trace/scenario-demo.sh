@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Scenario demo web pas a pas, avec un marqueur d'etape dans le traceur avant chaque etape.
 # A lancer dans Lab-Sunbeam, compte vagrant :
-#   bash ~/trace/scenario-demo.sh            deroule les etapes, Entree avant chacune
-#   bash ~/trace/scenario-demo.sh nettoyer   supprime tout ce que le scenario a cree
-# Prerequis : traceur demarre (bash ~/trace/start.sh) et cle publique copiee dans ~/web-key.pub.
+#   bash ~/2-trace/scenario-demo.sh            deroule les etapes, Entree avant chacune
+#   bash ~/2-trace/scenario-demo.sh nettoyer   supprime tout ce que le scenario a cree
+# Prerequis : traceur demarre (bash ~/2-trace/start.sh) et cle publique copiee dans ~/web-key.pub.
 # AUTO=1 enchaine les etapes sans attendre Entree.
 set -euo pipefail
 
@@ -74,12 +74,12 @@ if [ ! -f "$PUBKEY" ]; then
     exit 1
 fi
 if ! curl -s -m 3 -o /dev/null "$TRACE/history"; then
-    echo "Le traceur ne repond pas sur $TRACE : lance d'abord bash ~/trace/start.sh"
+    echo "Le traceur ne repond pas sur $TRACE : lance d'abord bash ~/2-trace/start.sh"
     exit 1
 fi
 source ~/demo-openrc
 if openstack network show web-net >/dev/null 2>&1; then
-    echo "Le reseau web-net existe deja : lance d'abord bash ~/trace/scenario-demo.sh nettoyer"
+    echo "Le reseau web-net existe deja : lance d'abord bash ~/2-trace/scenario-demo.sh nettoyer"
     exit 1
 fi
 
@@ -157,5 +157,5 @@ echo "   ping $FIP"
 echo "   ssh -i \"\$env:USERPROFILE\\.ssh\\web-key\" ubuntu@$FIP"
 echo "   navigateur : http://$FIP/"
 echo " Suivi de cloud-init : openstack console log show web-vm --lines 20"
-echo " Pour tout supprimer : bash ~/trace/scenario-demo.sh nettoyer"
+echo " Pour tout supprimer : bash ~/2-trace/scenario-demo.sh nettoyer"
 echo "================================================================"

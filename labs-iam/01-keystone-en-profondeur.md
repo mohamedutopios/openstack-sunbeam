@@ -412,5 +412,5 @@ openstack user delete lab-pwtest --domain users 2>/dev/null
 
 ## Pour aller plus loin
 
-- Lancer le traceur (`trace/PAS-A-PAS.md`) pendant le § 1.4 : chaque `POST /auth/tokens` et chaque validation `GET /auth/tokens` apparaît en direct.
+- Lancer le traceur (`2-trace/PAS-A-PAS.md`) pendant le § 1.4 : chaque `POST /auth/tokens` et chaque validation `GET /auth/tokens` apparaît en direct.
 - Mesurer la taille d’un jeton : `openstack token issue -f value -c id | wc -c`.
