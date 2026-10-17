@@ -101,7 +101,7 @@ Exemple : `sunbeam cluster list -f yaml`
 | `manifest` | Lire la configuration appliquée ; la générer en entier | Démo 1, étape 3 ; démo 4 |
 | `list-features`, `enable`, `disable` | Fonctionnalités optionnelles | Démo 1, étape 4 ; démo 5 |
 | `plans` | Voir les couches Terraform et leurs verrous | Démo 1, étape 5 ; § 8.2 |
-| `openrc`, `cloud-config`, `dashboard-url` | Récupérer les accès | Démo 2 |
+| `openrc`, `cloud-config`, `dashboard url` | Récupérer les accès | Démo 2 |
 | `launch` | Lancer une VM de test | Démo 3 |
 | `proxy`, `storage`, `identity`, `prepare-node-script`, `list-feature-gates` | Configuration d’entreprise | § 8 |
 | `bootstrap` | Installer le premier nœud d’un nouveau cloud | § 8.2 |
@@ -196,6 +196,8 @@ sunbeam cluster list
 │ sunbeam │ ONLINE  │ running │ active  │ active  │         │ active  │
 └─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
 ```
+
+⚠ L’ordre des colonnes `Cluster` et `Machine` **change d’une exécution à l’autre** : le même jour, une autre exécution a affiché `Machine` avant `Cluster`. Lire les titres, pas les positions ; pour un script, utiliser `-f yaml`, dont l’ordre est fixe.
 
 **Comment le lire :**
 
@@ -313,6 +315,7 @@ sunbeam list-features
 │ resource-optimization  │         │
 │ orchestration          │         │
 │ pro                    │         │
+│ secrets                │         │
 │ shared-filesystem      │         │
 │ telemetry              │         │
 │ tls.ca                 │         │
@@ -331,7 +334,8 @@ sunbeam list-features
 |---|---|---|
 | `orchestration` | Heat | Créer une infrastructure entière à partir d’un modèle (démo 5) |
 | `loadbalancer` | Octavia | Répartiteurs de charge |
-| `vault` | Vault | Coffre-fort de secrets ; sert notamment à `tls.vault` |
+| `secrets` | Barbican | Coffre-fort de clés et de certificats pour les utilisateurs du cloud |
+| `vault` | Vault | Coffre-fort de secrets pour l’infrastructure ; sert notamment à `tls.vault` |
 | `tls.*` | — | Chiffrer les API (HTTPS) |
 | `ldap` | Keystone | Brancher un annuaire LDAP ou Active Directory |
 | `dns` | Designate | Noms DNS pour les VM |
@@ -585,7 +589,7 @@ OS_CLIENT_CONFIG_FILE=~/clouds-equipe.yaml openstack --os-cloud sunbeam-admin hy
 **À quoi ça sert :** connaître l’adresse d’Horizon, pour la donner aux utilisateurs.
 
 ```bash
-sunbeam dashboard-url
+sunbeam dashboard url
 ```
 
 **Ce que tu vois :**
@@ -593,6 +597,8 @@ sunbeam dashboard-url
 ```text
 http://cloud.lab.test:80/openstack-horizon
 ```
+
+⚠ L’ancienne forme `sunbeam dashboard-url` fonctionne encore, mais affiche d’abord `Warning: This command is deprecated, please use sunbeam dashboard url instead.` Dans un script, `URL=$(sunbeam dashboard-url)` récupère alors une adresse inutilisable : utiliser `sunbeam dashboard url`.
 
 **Comment le lire :** Horizon est servi par l’adresse publique `cloud.lab.test` (`.201`), en **HTTP** (port 80) : le TLS n’est pas activé sur ce lab (`tls.*` non cochés en démo 1).
 
@@ -1066,7 +1072,7 @@ sunbeam plans unlock openstack-plan
 | `list-features`, `list-feature-gates` | ✅ | |
 | `plans list` | ✅ | |
 | `openrc`, `cloud-config` (`-u`, `-a`, `-c`) | ✅ | Profils vérifiés avec `openstack --os-cloud` |
-| `dashboard-url` | ✅ | |
+| `dashboard url` (et l’ancienne forme `dashboard-url`) | ✅ | `dashboard-url` est dépréciée |
 | `launch --name` | ✅ | VM joignable depuis Windows en 1 min 25 s |
 | `enable orchestration`, `disable orchestration` | ✅ | 9 min 50 s et 4 min 08 s ; restes dans Keystone à nettoyer |
 | `proxy show`, `storage list`, `identity provider list`, `prepare-node-script` | ✅ | |
