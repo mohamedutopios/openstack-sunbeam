@@ -195,6 +195,28 @@ and must be set to a value under 8EB (9223372036854775808 bytes).
 
 Deux confirmations indépendantes, dans le service lui-même. Il faut d’abord savoir **où** il tourne.
 
+**Pourquoi quitter Juju ici :** Juju a dit ce qu’il sait : l’état déclaré par le charm (`active`), l’heure du changement, l’option modifiée. Mais `juju debug-log` ne contient que les journaux du **charm** (ses étapes `config-changed`, `update-status`…), pas ceux de **Glance**, où l’on verrait l’erreur de l’utilisateur. Et Juju ne montre pas le fichier de configuration que le service lit réellement. Pour **confirmer** la cause, avec la preuve vue par le service, il faut aller là où il tourne : dans Kubernetes.
+
+**D’où vient `sudo k8s kubectl` :** le modèle `openstack` est de type Kubernetes (`juju models`, colonne `Type`). Ce Kubernetes est installé sur la machine par Sunbeam, sous la forme d’un snap nommé `k8s`. On le retrouve à deux endroits :
+
+```bash
+juju status -m admin/openstack-machines | grep "^k8s"
+snap list k8s
+```
+
+```text
+k8s                   1.32.13  active      1  k8s                   1.32/stable    1921  no       Ready
+Name  Version   Rev   Tracking       Publisher    Notes
+k8s   v1.32.13  5279  latest/stable  canonical**  classic,held
+```
+
+| Morceau de la commande | Rôle |
+|---|---|
+| `k8s` | La commande du snap Kubernetes de Canonical, installé par Sunbeam |
+| `kubectl` | Le client standard de Kubernetes, **fourni par ce snap**. Il n’est pas installé à part sur la machine : `kubectl` seul répond `command not found` |
+| `sudo` | Les accès d’administration du cluster Kubernetes sont réservés à `root` : sans `sudo`, la commande répond `You do not have enough permissions. Please re-run the command with sudo.` |
+| `-n openstack` | L’espace de noms (*namespace*) Kubernetes où Juju place les pods du modèle `openstack` : même nom que le modèle |
+
 **Où trouver le nom du pod et du conteneur :** chaque unité du modèle `openstack` est un **pod** Kubernetes, nommé comme l’unité, avec `-` à la place de `/` (`glance/0` → `glance-0`). Pour le vérifier, et connaître ses conteneurs :
 
 ```bash
@@ -211,7 +233,19 @@ glance-mysql-router-0            2/2     Running   18 (28h ago)   8d
 charm glance-api
 ```
 
-**Comment le lire :** le pod `glance-0` contient **deux** conteneurs (`2/2`) : `charm`, où tourne le charm, et **`glance-api`**, où tourne le service. Les journaux et la configuration du service sont dans `glance-api`.
+**Comment le lire :**
+
+| Ligne / colonne | Signification |
+|---|---|
+| `glance-0` | **Le** pod de Glance. Il n’y en a **qu’un** : c’est l’unité `glance/0`. `juju status -m openstack glance` le confirme : `Scale 1` |
+| `glance-mysql-router-0` | Un **autre** composant, pas une seconde instance de Glance : le routeur par lequel Glance accède à la base MySQL (application Juju `glance-mysql-router`) |
+| `READY 2/2` | Ce n’est **pas** un nombre d’instances : c’est le nombre de **conteneurs** du pod prêts, sur le nombre total. Le pod `glance-0` en contient deux, tous deux prêts |
+| `STATUS Running` | Le pod tourne |
+| `RESTARTS 7 (32h ago)` | Ses conteneurs ont redémarré 7 fois depuis sa création, la dernière il y a 32 heures : ce sont les redémarrages du lab, pas une panne en cours |
+| `AGE 8d` | Le pod existe depuis l’installation du cloud, il y a 8 jours |
+| `charm glance-api` | Les noms des deux conteneurs : `charm`, où tourne le charm (ce que voit Juju), et **`glance-api`**, où tourne le service lui-même |
+
+Les journaux et la configuration **du service** sont donc dans le conteneur `glance-api` : c’est lui qu’on vise avec `-c glance-api`.
 
 Dans le **journal de Glance** :
 
