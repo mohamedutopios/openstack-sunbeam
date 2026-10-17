@@ -396,11 +396,45 @@ La colonne `Locked` vide signifie qu’**aucune opération n’est en cours**.
 
 ---
 
-## 4. Démo 2 : préparer les accès d’une équipe (10 min) ✅
+## 4. Démo 2 : récupérer les accès au cloud (10 min) ✅
 
-**Objectif :** remettre à une équipe de quoi utiliser le cloud en ligne de commande, et l’adresse de l’interface web.
+**Objectif :** obtenir de quoi utiliser le cloud en ligne de commande, et l’adresse de l’interface web.
 
-Sur le lab, deux fichiers d’accès existent déjà, créés à l’installation : `~/admin-openrc` (administrateur) et `~/demo-openrc` (utilisateur `demo`). Les autres guides et démos les utilisent. Cette démo montre comment **les régénérer** avec `sunbeam`, par exemple après un changement de mot de passe ou pour une nouvelle équipe. On écrit dans de **nouveaux** fichiers pour ne pas écraser ceux du lab.
+### Avant de commencer : quels comptes `sunbeam` connaît-il ?
+
+`sunbeam` ne crée pas de comptes à la demande, et ne sait générer des accès que pour **deux comptes**, qui existent déjà :
+
+| Compte | Domaine / projet | Créé par | Quand |
+|---|---|---|---|
+| `admin` | `admin_domain` / `admin` | `sunbeam cluster bootstrap` | À l’installation du cloud |
+| `demo` | `users` / `demo`, rôle `member` | `sunbeam configure` (plan `demo-setup`, démo 1, étape 5) | Juste après l’installation, avec `demo-network` et `demo-router` |
+
+`sunbeam` a mémorisé ces deux comptes et leurs mots de passe au moment où il les a créés : c’est pour cela qu’il peut produire leurs accès. Sur le lab, ils existent depuis le 9 octobre. On le vérifie, avec le compte administrateur :
+
+```bash
+source ~/admin-openrc
+openstack user list --domain users
+openstack role assignment list --user demo --user-domain users --names
+```
+
+**Ce que tu vois :**
+
+```text
+| 18e2624580f345e895073662440271da | demo |
+
+| member | demo@users |       | demo@users |        |        | False     |
+```
+
+**Comment le lire :** le domaine `users` contient un seul compte, `demo` ; ce compte a le rôle `member` (utilisateur ordinaire) sur le projet `demo` du même domaine (la notation `nom@domaine`).
+
+**Si tu vois autre chose :** si `demo` n’existe pas, c’est que `sunbeam configure` n’a pas été lancé, ou que le compte a été supprimé ; `sunbeam cloud-config` (sans `-a`) ne peut alors rien produire d’utilisable.
+
+**Pour une vraie équipe**, avec ses propres comptes, `sunbeam` ne suffit pas :
+
+1. créer le domaine, le projet, les comptes et leurs rôles avec la commande `openstack` (`labs-iam/`) ;
+2. écrire le fichier d’accès de l’équipe en partant de ceux de cette démo, en remplaçant le nom du compte, son domaine, son projet et son mot de passe.
+
+Sur le lab, les deux fichiers d’accès existent déjà : `~/admin-openrc` et `~/demo-openrc`. Les autres guides les utilisent. Cette démo montre comment **les régénérer** avec `sunbeam`, par exemple après un changement de mot de passe, et sous une autre forme (`clouds.yaml`). On écrit dans de **nouveaux** fichiers pour ne pas écraser ceux du lab.
 
 ### Étape 1 : les variables de l’administrateur
 
@@ -443,7 +477,44 @@ Utilisation : `source ~/admin-openrc.nouveau`, puis toutes les commandes `openst
 
 ### Étape 2 : un fichier `clouds.yaml` pour plusieurs comptes
 
-**À quoi ça sert :** au lieu d’un fichier openrc par compte, un seul fichier `clouds.yaml` contient plusieurs **profils**, qu’on choisit avec `--os-cloud`.
+**À quoi ça sert :** au lieu d’un fichier openrc par compte, un seul fichier `clouds.yaml` contient plusieurs **profils**, qu’on choisit avec `--os-cloud`. Ici : un profil pour `demo`, un pour `admin`.
+
+D’abord, **regarder** ce que la commande produirait, sans rien écrire (le mot de passe est masqué par `sed`) :
+
+```bash
+sunbeam cloud-config --no-hints | sed -E "s/(password: ).*/\1********/"
+```
+
+**Ce que tu vois :**
+
+```yaml
+clouds:
+  sunbeam:
+    auth:
+      auth_url: http://cloud.lab.test/openstack-keystone/v3
+      password: ********
+      project_domain_name: users
+      project_name: demo
+      user_domain_name: users
+      username: demo
+    region_name: RegionOne
+```
+
+**Comment le lire :**
+
+| Ligne | Valeur | D’où elle vient |
+|---|---|---|
+| `clouds:` | | Le début de la liste des profils du fichier |
+| `sunbeam:` | | Le **nom du profil**. Personne ne l’a choisi : c’est le nom par défaut que `sunbeam` donne quand on ne précise pas `-c`. Il n’a rien à voir avec le nœud `sunbeam` ; c’est ce nom qu’on tapera dans `--os-cloud sunbeam` |
+| `username: demo`, `password` | | Le compte de démonstration. Sans `-a`, la commande produit **toujours** le profil de `demo`, créé par `sunbeam configure` (voir « Avant de commencer ») |
+| `user_domain_name: users` | | Le domaine où est rangé le compte `demo` |
+| `project_name: demo`, `project_domain_name: users` | | Le projet sur lequel `demo` travaille, et son domaine |
+| `auth_url` | | L’adresse de Keystone, la même que dans l’openrc |
+| `region_name` | `RegionOne` | La région |
+
+C’est **le même contenu qu’un openrc**, rangé sous un nom de profil.
+
+Ensuite, **écrire** les deux profils dans un fichier :
 
 ```bash
 sunbeam cloud-config -u -f ~/clouds-equipe.yaml --no-hints
@@ -457,27 +528,11 @@ sunbeam cloud-config -a -c sunbeam-admin -u -f ~/clouds-equipe.yaml --no-hints
 | `cloud-config` | Générer une configuration au format `clouds.yaml` |
 | `-u` | **Écrire** dans le fichier (*update*). Sans `-u`, la commande affiche seulement le YAML à l’écran |
 | `-f FICHIER` | Le fichier visé. Par défaut : `~/.config/openstack/clouds.yaml` |
-| `-a` | Profil de l’**administrateur**. Sans `-a`, profil de l’utilisateur `demo` |
-| `-c NOM` | Nom du profil. Par défaut : `sunbeam` |
+| `-a` | Profil de l’**administrateur** (`admin`). Sans `-a`, profil de `demo` |
+| `-c NOM` | Nom du profil. Sans `-c` : `sunbeam` |
 | `--no-hints` | Pas de question interactive |
 
-La première ligne crée le profil `sunbeam` (utilisateur `demo`) ; la seconde **ajoute** le profil `sunbeam-admin` dans le même fichier.
-
-**Ce que tu vois** (profil `sunbeam`, affiché par la commande) :
-
-```yaml
-clouds:
-  sunbeam:
-    auth:
-      auth_url: http://cloud.lab.test/openstack-keystone/v3
-      project_domain_name: users
-      project_name: demo
-      user_domain_name: users
-      username: demo
-    region_name: RegionOne
-```
-
-**Comment le lire :** même contenu qu’un openrc, rangé sous un nom de profil. Le compte `demo` est dans le domaine `users`, et travaille dans le projet `demo`.
+La première ligne crée le profil `sunbeam` (compte `demo`) ; la seconde **ajoute** le profil `sunbeam-admin` (compte `admin`) dans le même fichier. On donne un nom différent avec `-c` pour que les deux profils ne portent pas le même nom.
 
 🔎 **Vérifier que les profils fonctionnent :**
 
@@ -493,6 +548,7 @@ OS_CLIENT_CONFIG_FILE=~/clouds-equipe.yaml openstack --os-cloud sunbeam-admin hy
 | Symptôme | Cause | Que faire |
 |---|---|---|
 | `Cloud sunbeam was not found` | Le fichier n’a pas été écrit (oubli de `-u`) ou le chemin est faux | Relancer avec `-u`, vérifier `ls -l ~/clouds-equipe.yaml` |
+| `401` avec le profil `sunbeam` | Le compte `demo` a été supprimé ou son mot de passe changé depuis `sunbeam configure` | Vérifier le compte (« Avant de commencer ») |
 | Le profil semble ignoré, ou le mauvais compte répond | Des variables `OS_*` sont déjà chargées (`source ~/admin-openrc`) et se mélangent au profil | Tester dans une session neuve, sans `source` préalable |
 | Message « Generated … » mais fichier introuvable | Chemin dans `/tmp` : le snap a son propre `/tmp`, invisible pour toi | Toujours écrire dans `~/` |
 
@@ -500,7 +556,7 @@ OS_CLIENT_CONFIG_FILE=~/clouds-equipe.yaml openstack --os-cloud sunbeam-admin hy
 
 ### Étape 3 : l’adresse de l’interface web
 
-**À quoi ça sert :** donner l’adresse d’Horizon à l’équipe.
+**À quoi ça sert :** connaître l’adresse d’Horizon, pour la donner aux utilisateurs.
 
 ```bash
 sunbeam dashboard-url
