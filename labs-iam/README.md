@@ -2,7 +2,20 @@
 
 Ces travaux pratiques accompagnent les modules 8 à 12 du support (`support/8-…` à `support/12-…`). Les supports expliquent ; ici, on **fait** : chaque TP enchaîne des scénarios reproductibles, avec les commandes, le résultat attendu, les questions à poser aux apprenants et les pièges.
 
-> **Statut : rédigé, pas encore rejoué sur le lab.** Les commandes suivent la syntaxe du client `openstack` 7.x et de Keystone 2024.1 (Caracal), déployé par Sunbeam. Certains comportements dépendent de l’activation de Secure RBAC sur ton lab : le TP 1 (§ 1.6) le fait vérifier en premier, et chaque résultat concerné est signalé par **⚖ dépend de Secure RBAC**. Rejoue chaque TP avant de l’utiliser en formation et note les écarts.
+> **Statut :** le **TP 1 a été rejoué** sur le lab le 17 octobre 2026 (Keystone 2024.1 déployé par Sunbeam, client `openstack` 7.5.0) ; ses résultats sont ceux observés. Les **TP 2 à 5 ne sont pas encore rejoués** : ils ont été relus et mis en cohérence avec ce que le TP 1 a montré, et les résultats qui en sont déduits sont marqués « à confirmer ». Rejoue chaque TP avant de l’utiliser en formation et note les écarts.
+
+### Ce que le TP 1 a montré, et qui change les TP suivants
+
+Les règles de Keystone sur ce lab (TP 1, § 1.6.2) n’appliquent pas le modèle Secure RBAC décrit dans le support :
+
+| Constat | Conséquence pour les TP |
+|---|---|
+| `create_user`, `create_project` et `create_grant` exigent le rôle `admin` ; **aucune règle ne mentionne `manager`** | Un gestionnaire de domaine (`manager` sur le domaine) ne peut ni créer de comptes, ni créer de projets, ni donner de rôles. Il n’est en pratique qu’un **lecteur** de son domaine. Les TP 2, 3 et 5 font donc faire ces créations par la **plateforme** (`admin`), après avoir constaté le refus |
+| `rule:admin_required` accepte un rôle `admin` **quelle que soit sa portée** | « Admin quelque part, admin partout » (TP 2, § 2.3) : donner `admin` à un client, même sur un seul projet, lui donne tout |
+| `admin@admin_domain` n’a **aucun rôle système** | Pas de jeton système pour l’administrateur (`401`) ; les démonstrations de portée système passent par un compte dédié (TP 4, § 4.4) |
+| Nova réserve `os-hypervisors:list` à l’administrateur (`rule:context_is_admin`) | Un lecteur système ne voit pas les hyperviseurs (TP 4, § 4.4) |
+
+⚠ **Avant chaque séance :** désactiver la mise en veille du PC (`powercfg /change standby-timeout-ac 0`), démarrer **Lab-Services puis Lab-Sunbeam**, et vérifier que le cloud est stable. Sans Lab-Services, son DNS manque : Nova, Neutron et Cinder répondent `503 … The Keystone service is temporarily unavailable`. Après une veille, la VM se réveille avec une horloge décalée et une charge très élevée : les commandes échouent de façon aléatoire.
 
 ## Parcours
 
@@ -36,7 +49,7 @@ Plateforme (équipe cloud)        → domaine admin_domain, projet admin   (déj
 | Personne | Compte | Domaine | Rôle visé | TP |
 |---|---|---|---|---|
 | Équipe plateforme | `admin` (existant) | `admin_domain` | admin | tous |
-| Bruno | `bruno` | `acme` | manager du domaine `acme` | 2, 4 |
+| Bruno | `bruno` | `acme` | manager du domaine `acme` (sur ce lab : lecture seule du domaine, voir plus haut) | 2, 4 |
 | Chloé | `chloe` | `acme` | member de `acme-dev` | 3, 4 |
 | Emma | `emma` | `acme` | member de `acme-prod`, reader sur tout Acme | 3, 4 |
 | David | `david` | `acme` | reader (auditeur) sur tout Acme | 4 |
@@ -93,6 +106,7 @@ Sans `os_as`, les commandes s’exécutent en tant qu’`admin` sur le projet `a
 | ✅ **Attendu** | Résultat attendu si tout est conforme |
 | ⛔ **Refus attendu** | La commande **doit** échouer : c’est la démonstration |
 | ⚖ **dépend de Secure RBAC** | Le résultat change selon `enforce_scope` et `enforce_new_defaults` (TP 1, § 1.6) |
+| « à confirmer » | Résultat **déduit** des règles lues au TP 1, pas encore observé |
 | ❓ **Question** | À poser aux apprenants avant de lancer la commande |
 | ⚠ **Piège** | Erreur fréquente ou comportement contre-intuitif |
 

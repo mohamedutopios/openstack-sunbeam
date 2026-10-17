@@ -1,12 +1,12 @@
 # TP 3 : projets, hiérarchie et quotas
 
-> Statut : rédigé, **pas encore rejoué sur le lab**. Voir les conventions dans [README.md](README.md).
+> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 10, projets, hiérarchie et quotas.
 **Durée :** 2 h 30.
 **Objectifs :** constater l’étanchéité d’un projet, construire un arbre de projets, utiliser les rôles hérités, fixer des quotas et les voir bloquer une demande, puis choisir un modèle d’organisation pour un SI cloisonné.
 
-**Prérequis :** état de fin du TP 2 (domaine `acme`, projets `acme-si` et `acme-dev`, comptes `bruno`, `chloe`, `emma`, `david`). Session préparée :
+**Prérequis :** état de fin du TP 2 (domaine `acme`, projets `acme-si` et `acme-dev`, comptes `bruno`, `chloe`, `emma`, `david`, `chloe` membre d’`acme-dev`). Sur ce lab, les comptes et `acme-dev` ont été créés par la plateforme (TP 2, § 2.4). Toutes les actions d’administration de ce TP (projets, affectations, quotas) se font donc avec le compte `admin`. Session préparée :
 
 ```bash
 source ~/labs-iam/lab-env.sh
@@ -113,15 +113,17 @@ os_as david acme projet acme-dev acme -- network create acme-intrus
 os_as david acme projet acme-si acme -- network list
 ```
 
-✅ **Attendu :** la lecture réussit sur `acme-dev`. ⛔ **Refus attendu (403)** sur la création ⚖ **dépend de Secure RBAC** (avec les anciennes règles, `reader` peut être traité comme `member`). ⛔ **Refus attendu (401)** sur `acme-si` : aucun rôle effectif sur ce projet.
+✅ **Attendu :** la lecture réussit sur `acme-dev`. ⛔ **Refus attendu (403)** sur la création : sur ce lab, la règle de Neutron est `create_network: (rule:admin_only) or (role:member and project_id:%(project_id)s)` (TP 1, § 1.6.2) ; elle exige `member`, et `reader` n’implique pas `member`. ⛔ **Refus attendu (401)** sur `acme-si` : aucun rôle effectif sur ce projet.
 
 ### Simulation : un nouveau projet hérite automatiquement
 
 ```bash
-os_as bruno acme domaine acme -- project create acme-dev-api --domain acme --parent acme-dev
+openstack project create acme-dev-api --domain acme --parent acme-dev
 openstack role assignment list --user david --user-domain acme --names --effective | grep acme-dev-api
 os_as david acme projet acme-dev-api acme -- server list
 ```
+
+Le projet est créé par la plateforme : sur ce lab, le gestionnaire de domaine ne peut pas créer de projet (TP 2, § 2.4).
 
 ✅ **Attendu :** David a déjà `reader` sur `acme-dev-api`, sans qu’on l’ait ajouté : l’héritage s’évalue à chaque jeton.
 
@@ -214,7 +216,7 @@ os_as emma acme projet acme-recette acme -- server list
 os_as bruno acme domaine acme -- quota set acme-dev --domain acme --instances 50
 ```
 
-⛔ **Refus attendu (403) :** les quotas sont décidés par la plateforme, qui protège la capacité commune. ⚖ **dépend de Secure RBAC** pour la forme exacte du refus.
+⛔ **Refus attendu (403) :** les quotas sont décidés par la plateforme, qui protège la capacité commune. Sur ce lab, Bruno n’est en pratique qu’un lecteur de son domaine (TP 2, § 2.4) : le refus est certain, quelle que soit la règle exacte de chaque service.
 
 ### 3.4.4 Les quotas par défaut
 

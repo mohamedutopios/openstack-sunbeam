@@ -1,6 +1,6 @@
 # TP 1 : Keystone en profondeur
 
-> Statut : rédigé, **pas encore rejoué sur le lab**. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab le 17 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats ✅ ci-dessous sont ceux observés. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 8, Keystone en profondeur.
 **Durée :** 2 h 30.
@@ -52,15 +52,18 @@ Puis les **affectations**, qui relient les trois : acteur, rôle, cible.
 openstack role assignment list --names
 ```
 
-✅ **Attendu (cloud Sunbeam du lab) :**
+✅ **Observé sur le lab :**
 
-| Entité | Valeurs typiques |
+| Entité | Valeurs |
 |---|---|
-| Domaines | `admin_domain`, `service_domain`, `users`, `Default` |
-| Projets | `admin` (dans `admin_domain`), `services` (dans `service_domain`), `demo` (dans `users`) |
-| Utilisateurs | `admin` ; un compte par service (`nova`, `neutron`, `glance`, `placement`, `cinder`…) dans `service_domain` ; `demo` dans `users` |
-| Rôles | au moins `admin`, `member`, `reader`, souvent `manager` et `service` |
-| Affectations | `admin` → `admin` sur le projet `admin` ; comptes de service → `admin` ou `service` sur `services` ; `demo` → `member` sur `demo` |
+| Domaines | `admin_domain`, `service_domain` (description « Created by Juju »), `users`, `Default` |
+| Projets | `admin` (dans `admin_domain`), `services` (dans `service_domain`), `demo` (dans `users`), et un second `admin` dans `Default` : « Bootstrap project for initializing the cloud » |
+| Utilisateurs | `admin` ; dans `service_domain`, un compte par service avec un suffixe aléatoire (`svc_nova-F8OChi`, `svc_neutron-Jbci5R`, `svc_glance-…`, `svc_placement-…`, `svc_cinder-…`), plus `horizon`, `cinder-volume`, `openstack-hypervisor` et un `svc_remote_…` ; `demo` dans `users` ; `_charm-keystone-admin` dans `Default` |
+| Rôles | `admin`, `manager`, `member`, `reader`, `service` |
+| Rôles impliqués | `admin` → `manager` → `member` → `reader` |
+| Affectations | `admin@admin_domain` : `admin` et `member` sur le projet `admin`, `admin` sur le **domaine** `admin_domain` ; chaque compte de service : `admin` **et** `service` sur `services` ; `demo` : `member` sur `demo` ; `_charm-keystone-admin@Default` : `admin` sur le **système** (le seul) |
+
+`_charm-keystone-admin` est le compte que le charm Keystone utilise lui-même pour administrer Keystone : c’est le seul à avoir un rôle sur le système.
 
 ### Exercice
 
@@ -73,7 +76,7 @@ Les apprenants complètent ce tableau à partir de leurs sorties :
 | Quel rôle `admin` implique-t-il ? | `openstack implied role list` | |
 | L’utilisateur `demo` peut-il voir le projet `admin` ? | `openstack role assignment list --user demo --user-domain users --names` | |
 
-⚠ **Piège :** `openstack user list` sans `--domain` liste les utilisateurs **de tous les domaines** quand on est administrateur global. Deux utilisateurs peuvent porter le même nom dans deux domaines différents (on le démontre au TP 2) : un nom seul ne désigne pas un compte.
+⚠ **Piège :** `openstack user list` sans `--domain` ne liste **pas** tous les comptes. Sur le lab, avec le jeton de l’administrateur (projet `admin` du domaine `admin_domain`), il ne renvoie qu’**un** compte, `admin` : ceux du domaine du jeton. Pour inventorier un cloud, interroger chaque domaine : `for d in $(openstack domain list -f value -c Name); do openstack user list --domain "$d"; done`. Deux utilisateurs peuvent aussi porter le même nom dans deux domaines différents (TP 2) : un nom seul ne désigne pas un compte.
 
 ### Lire une affectation effective
 
@@ -98,12 +101,15 @@ openstack endpoint list --service network
 openstack endpoint list --interface internal
 ```
 
-✅ **Attendu :** chaque service a un point d’accès **public** (`http://cloud.lab.test/openstack-<service>`) et **internal** (`http://internal.lab.test/openstack-<service>`), dans la région `RegionOne`.
+✅ **Observé :** chaque service a **trois** points d’accès dans `RegionOne` : **public** (`http://cloud.lab.test:80/openstack-<service>`), **internal** (`http://internal.lab.test:80/openstack-<service>`) et **admin** (une adresse interne à Kubernetes, par exemple `http://10.152.183.106:9696` pour Neutron). Exceptions : Keystone, dont l’interface `admin` est aussi `internal.lab.test` ; le stockage objet (`swift`, `s3`), servi par `rgw.lab.test`.
 
 | Interface | Adresse | Qui l’utilise |
 |---|---|---|
 | `public` | `cloud.lab.test` → `192.168.56.201` (Traefik public) | Clients : CLI, Horizon, apprenants |
-| `internal` | `internal.lab.test` → `192.168.56.202` (Traefik interne) | Services entre eux : nova-compute → Neutron, Glance… |
+| `internal` | `internal.lab.test` → `192.168.56.202` (Traefik interne) | Services entre eux : nova-compute → Neutron, Glance… ; c’est aussi l’adresse par laquelle les services **valident les jetons** auprès de Keystone |
+| `admin` | `10.152.183.x` (adresse de service Kubernetes) | Joignable seulement depuis le cluster |
+
+⚠ Les services résolvent `internal.lab.test` grâce au DNS de **Lab-Services**. Si Lab-Services est arrêté, Nova, Neutron et Cinder ne peuvent plus valider les jetons et répondent `503 … The Keystone service is temporarily unavailable` (constaté sur le lab).
 
 Voir le catalogue dans le jeton lui-même, et l’appel qui suit :
 
@@ -119,7 +125,7 @@ openstack --debug network list 2>&1 | grep -E "^REQ: curl|^RESP: \[" | head -6
 openstack --os-interface internal --debug network list 2>&1 | grep -E "^REQ: curl" | sed -n 2p
 ```
 
-✅ **Attendu :** l’appel part cette fois vers `internal.lab.test`. Depuis Lab-Sunbeam, les deux fonctionnent ; depuis Windows, seul `public` est prévu.
+✅ **Observé :** l’appel part cette fois vers `http://internal.lab.test:80/openstack-neutron/v2.0/networks`. Depuis Lab-Sunbeam, les deux fonctionnent ; depuis Windows, seul `public` est prévu.
 
 ❓ **Question :** un apprenant obtient `EndpointNotFound` en appelant `openstack volume list`. Quelles sont les trois causes possibles ? *Réponse : service absent du catalogue, mauvaise région (`OS_REGION_NAME`), interface demandée inexistante pour ce service.*
 
@@ -133,7 +139,7 @@ openstack --os-interface internal --debug network list 2>&1 | grep -E "^REQ: cur
 openstack token issue
 ```
 
-✅ **Attendu :** les champs `expires`, `id` (le jeton, environ 180 à 250 caractères), `project_id`, `user_id`.
+✅ **Observé :** les champs `expires` (une heure plus tard), `id` (le jeton, environ 180 caractères, commençant par `gAAAAA`), `project_id`, `user_id`.
 
 ### 1.4.2 Obtenir un jeton à la main, avec l’API
 
@@ -148,60 +154,79 @@ cat > /tmp/auth-projet.json <<EOF
   "scope": {"project": {"name": "demo", "domain": {"name": "users"}}}
 }}
 EOF
-curl -s -i -X POST "$OS_AUTH_URL/auth/tokens" -H "Content-Type: application/json" -d @/tmp/auth-projet.json \
+curl -s -X POST "$OS_AUTH_URL/auth/tokens" -H "Content-Type: application/json" -d @/tmp/auth-projet.json \
   -o /tmp/token-body.json -D /tmp/token-headers.txt
 grep -i "^X-Subject-Token" /tmp/token-headers.txt | cut -c1-60
 python3 -m json.tool /tmp/token-body.json | head -40
 ```
 
-✅ **Attendu :**
+`-o` écrit le **corps** de la réponse dans un fichier, `-D` les **en-têtes** dans un autre. ⚠ Ne pas ajouter `-i` : il mêlerait les en-têtes au corps, et le fichier ne serait plus du JSON lisible (constaté : `Expecting value: line 1 column 1`).
 
-- le jeton est dans l’**en-tête** `X-Subject-Token`, pas dans le corps ;
-- le corps contient `methods: ["password"]`, `user`, `project`, `roles` (`member`, `reader`), `expires_at`, `audit_ids`, et `catalog` (la liste des services).
+✅ **Observé :**
+
+- le jeton est dans l’**en-tête** `X-Subject-Token` (`gAAAAA…`), pas dans le corps ;
+- le corps contient `methods: ["password"]`, `user`, `project`, `roles`, `expires_at`, `audit_ids`, et `catalog` (la liste des services).
 
 ```bash
 python3 -c "import json; t=json.load(open('/tmp/token-body.json'))['token']; print('roles :', [r['name'] for r in t['roles']]); print('services au catalogue :', len(t['catalog'])); print('expire :', t['expires_at'])"
 ```
 
+```text
+roles : ['member', 'reader']
+services au catalogue : 9
+expire : 2026-10-17T21:47:25.000000Z
+```
+
 ### 1.4.3 Les portées : sans portée, projet, domaine, système
 
-**Jeton sans portée** (aucun `scope`) : il prouve l’identité, sans autoriser d’action.
+**Jeton sans portée** : il prouve l’identité, sans autoriser d’action. Première tentative, en retirant simplement le `scope` de la demande :
 
 ```bash
 python3 - <<'EOF'
 import json
 d = json.load(open('/tmp/auth-projet.json'))
 del d['auth']['scope']
+json.dump(d, open('/tmp/auth-defaut.json', 'w'))
+d['auth']['scope'] = 'unscoped'
 json.dump(d, open('/tmp/auth-sans-portee.json', 'w'))
 EOF
+curl -s -X POST "$OS_AUTH_URL/auth/tokens" -H "Content-Type: application/json" -d @/tmp/auth-defaut.json \
+  | python3 -c "import sys,json; t=json.load(sys.stdin)['token']; print('roles' in t, 'catalog' in t, t.get('project',{}).get('name'))"
+```
+
+✅ **Observé :** `True True demo`. Surprise : le jeton **a** une portée, le projet `demo`. Le compte `demo` a un **projet par défaut** (`openstack user show demo --domain users -c default_project_id`) : sans portée demandée, Keystone lui applique celui-là.
+
+Pour un vrai jeton sans portée, il faut le **demander explicitement** avec `"scope": "unscoped"` (second fichier préparé ci-dessus) :
+
+```bash
 curl -s -X POST "$OS_AUTH_URL/auth/tokens" -H "Content-Type: application/json" -d @/tmp/auth-sans-portee.json \
   | python3 -c "import sys,json; t=json.load(sys.stdin)['token']; print('roles' in t, 'catalog' in t, list(t))"
 ```
 
-✅ **Attendu :** `False False`, et la liste des clés sans `roles` ni `catalog`. Un jeton sans portée sert seulement à découvrir ce à quoi on a droit :
+✅ **Observé :** `False False ['methods', 'user', 'audit_ids', 'expires_at', 'issued_at']` : ni rôles, ni catalogue, ni projet. Un jeton sans portée sert seulement à découvrir ce à quoi on a droit :
 
 ```bash
 UNSCOPED=$(curl -s -i -X POST "$OS_AUTH_URL/auth/tokens" -H "Content-Type: application/json" -d @/tmp/auth-sans-portee.json | grep -i "^X-Subject-Token" | cut -d' ' -f2 | tr -d '\r')
 curl -s "$OS_AUTH_URL/auth/projects" -H "X-Auth-Token: $UNSCOPED" | python3 -m json.tool | grep -E '"name"'
 ```
 
-✅ **Attendu :** `demo` (le seul projet où `demo` a un rôle).
+✅ **Observé :** `"name": "demo"` (le seul projet où `demo` a un rôle).
 
-**Jeton de domaine** et **jeton système**, avec l’administrateur :
+**Jeton de domaine** et **jeton système**, avec l’administrateur. D’abord, sur quoi `admin` a-t-il un rôle ?
 
 ```bash
 openstack role assignment list --user admin --user-domain admin_domain --names
 openstack role assignment list --system all --names
 ```
 
-Si `admin` a un rôle sur son domaine, ou sur le système :
+✅ **Observé :** `admin` a `admin` et `member` sur le projet `admin`, et `admin` sur le **domaine** `admin_domain` ; sur le **système**, seul `_charm-keystone-admin@Default` a un rôle. `admin` n’en a **aucun**.
 
 ```bash
 env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-domain-name admin_domain token issue -c domain_id -c expires
 env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-system-scope all token issue -c system -c expires
 ```
 
-✅ **Attendu :** un jeton avec `domain_id`, et un jeton avec `system: {'all': True}`. ⛔ **Refus attendu** (`401`) si le compte n’a **aucun rôle** sur la cible demandée : on ne peut pas obtenir une portée sur laquelle on n’a rien.
+✅ **Observé :** un jeton de domaine (`domain_id` de `admin_domain`) ; puis ⛔ `The request you have made requires authentication. (HTTP 401)` pour le jeton système, puisqu’`admin` n’a aucun rôle sur le système : **on ne peut pas obtenir une portée sur laquelle on n’a rien**. Sur un cloud Sunbeam, l’administrateur travaille donc avec des jetons de **projet** ou de **domaine**.
 
 ⚠ **Piège :** le client `openstack` refuse de mélanger les portées. Si `OS_PROJECT_NAME` est défini, `--os-domain-name` est ignoré ou provoque une erreur : d’où les `env -u …`. La fonction `os_as` du fichier `lab-env.sh` s’en charge.
 
@@ -223,7 +248,7 @@ curl -s -o /dev/null -w "validation : %{http_code}\n" -I "$OS_AUTH_URL/auth/toke
   -H "X-Auth-Token: $ADMIN_TOKEN" -H "X-Subject-Token: $TOKEN"
 ```
 
-✅ **Attendu :** `200`. Le jeton de `demo` est vérifié avec le jeton de quelqu’un qui a le droit de vérifier (ici `admin`, en pratique le compte de service de Nova, de Neutron…).
+✅ **Observé :** `validation : 200`. Le jeton de `demo` est vérifié avec le jeton de quelqu’un qui a le droit de vérifier (ici `admin`, en pratique le compte de service de Nova, de Neutron…).
 
 ### 1.4.5 Un jeton est un « porteur »
 
@@ -234,7 +259,7 @@ curl -s "http://cloud.lab.test/openstack-neutron/v2.0/networks" -H "X-Auth-Token
   | python3 -c "import sys,json; print([n['name'] for n in json.load(sys.stdin)['networks']])"
 ```
 
-✅ **Attendu :** les réseaux visibles par `demo`.
+✅ **Observé :** `['demo-network', 'external-network']`, les réseaux visibles par `demo`, obtenus sans aucun mot de passe.
 
 ❓ **Question :** quelles conséquences pour la sécurité ? *Réponse : un jeton intercepté vaut un accès complet jusqu’à son expiration ; d’où HTTPS, une durée courte, et la révocation.*
 
@@ -248,7 +273,7 @@ curl -s -o /dev/null -w "appel Neutron après révocation : %{http_code}\n" \
   "http://cloud.lab.test/openstack-neutron/v2.0/networks" -H "X-Auth-Token: $TOKEN"
 ```
 
-✅ **Attendu :** `404` à la validation, `401` chez Neutron. ⚠ **Piège :** les services gardent les validations en cache quelques minutes (`keystonemiddleware`, `token_cache_time`) : un jeton révoqué peut encore être accepté par un service peu de temps après la révocation.
+✅ **Observé :** `validation après révocation : 404`, `appel Neutron après révocation : 401`. ⚠ **Piège :** les services gardent les validations en cache quelques minutes (`keystonemiddleware`, `token_cache_time`) : un jeton révoqué peut encore être accepté par un service peu de temps après la révocation.
 
 ### 1.4.7 Durée de vie et clés Fernet
 
@@ -256,10 +281,33 @@ curl -s -o /dev/null -w "appel Neutron après révocation : %{http_code}\n" \
 python3 -c "import json; print(json.load(open('/tmp/token-body.json'))['token']['expires_at'])"
 date -u +%Y-%m-%dT%H:%M:%S
 $K exec keystone-0 -c keystone -- sh -c 'grep -A6 "^\[token\]" /etc/keystone/keystone.conf; grep -A4 "^\[fernet_tokens\]" /etc/keystone/keystone.conf; ls -l /etc/keystone/fernet-keys/'
-juju config -m openstack keystone | grep -B1 -A4 -i -E "token-expiration|fernet"
 ```
 
-✅ **Attendu :** `provider = fernet` ; une durée de vie (`expiration`, en secondes, souvent 3600) ; un répertoire `fernet-keys` contenant plusieurs clés numérotées (`0` = clé en attente, la plus grande = clé primaire).
+✅ **Observé :**
+
+```text
+[token]
+expiration = 3600
+allow_expired_window = 169200
+
+[fernet_tokens]
+max_active_keys = 4
+
+-rw------- 1 keystone keystone    44 Oct 17 17:10 0
+-rw------- 1 keystone keystone    44 Oct 15 14:10 7
+-rw------- 1 keystone keystone    44 Oct 15 14:10 8
+-rw------- 1 keystone keystone    44 Oct 16 12:45 9
+drwx------ 2 root     root     16384 Oct  9 10:35 lost+found
+```
+
+| Réglage | Signification |
+|---|---|
+| `expiration = 3600` | Un jeton vit **une heure** |
+| `allow_expired_window = 169200` | Pendant 47 heures après expiration, un service peut encore faire accepter un jeton expiré pour **terminer** une opération longue déjà commencée |
+| `max_active_keys = 4` | Quatre clés Fernet au plus |
+| Fichiers `0`, `7`, `8`, `9` | Les clés : `0` est la clé **en attente** (la prochaine primaire) ; la plus grande, `9`, est la clé **primaire**, qui chiffre les nouveaux jetons ; les autres servent encore à **déchiffrer** les jetons émis avant la dernière rotation |
+
+`provider = fernet` n’est pas écrit : c’est la valeur par défaut. Le charm Keystone ne propose pas d’option Juju pour la durée des jetons ni pour la rotation des clés (`juju config -m openstack keystone` n’en montre aucune) : ces réglages sont fixés par le charm.
 
 ❓ **Question :** un jeton Fernet ne contient pas le catalogue, alors que la réponse de `POST /auth/tokens` le contient. Pourquoi ? *Réponse : le jeton Fernet est un petit message chiffré (utilisateur, portée, méthodes, expiration, identifiant d’audit) ; Keystone reconstruit le reste (rôles, catalogue) à chaque validation. Il n’est stocké nulle part : c’est pourquoi la révocation passe par une liste d’événements de révocation.*
 
@@ -271,10 +319,21 @@ juju config -m openstack keystone | grep -B1 -A4 -i -E "token-expiration|fernet"
 
 ```bash
 openstack user show demo --domain users
-$K exec keystone-0 -c keystone -- sh -c 'grep -E "^\[identity\]" -A8 /etc/keystone/keystone.conf'
+$K exec keystone-0 -c keystone -- sh -c 'sed -n "/^\[identity\]/,/^\[/p" /etc/keystone/keystone.conf | grep -v "^\["'
 ```
 
-✅ **Attendu :** `driver = sql` (ou valeur par défaut) ; `domain_specific_drivers_enabled` absent ou `false` : tous les domaines utilisent la base SQL de Keystone.
+La seconde commande n’affiche **que** la section `[identity]`. ⚠ Ne pas utiliser `grep -A8 "^\[identity\]"` : sur le lab, les lignes suivantes sont celles de la section `[database]`, dont la chaîne de connexion contient **le mot de passe MySQL de Keystone** (constaté).
+
+✅ **Observé :**
+
+```text
+driver = sql
+default_domain_id = default
+domain_specific_drivers_enabled = True
+domain_config_dir = /etc/keystone/domains
+```
+
+**Comment le lire :** les comptes sont en base SQL (`driver = sql`) ; mais `domain_specific_drivers_enabled = True` : Keystone accepte qu’**un domaine** ait sa **propre** source d’identité (un annuaire LDAP, par exemple), décrite par un fichier dans `/etc/keystone/domains`. C’est ce qui permet de brancher l’annuaire d’un client sur son seul domaine (module 11).
 
 ### 1.5.2 Comptes de service
 
@@ -283,7 +342,7 @@ openstack user list --domain service_domain
 openstack role assignment list --project services --project-domain service_domain --names
 ```
 
-✅ **Attendu :** un compte par service (`nova`, `neutron`, `glance`, `placement`, `cinder`…), avec un rôle sur le projet `services`. Ce sont eux qui valident les jetons des utilisateurs (§ 1.4.4) et qui s’appellent entre eux (nova-compute → Neutron).
+✅ **Observé :** un compte par service, nommé `svc_<service>-<suffixe aléatoire>` (`svc_nova-F8OChi`, `svc_neutron-Jbci5R`…), plus `horizon`, `cinder-volume`, `openstack-hypervisor` et `svc_remote_…`, chacun avec **deux** rôles sur le projet `services` : `admin` et `service`. Ce sont eux qui valident les jetons des utilisateurs (§ 1.4.4) et qui s’appellent entre eux (nova-compute → Neutron).
 
 ### 1.5.3 Identités externes (fédération)
 
@@ -292,7 +351,7 @@ openstack identity provider list
 openstack mapping list
 ```
 
-✅ **Attendu sur ce lab :** listes vides tant que la fédération Keycloak n’est pas configurée (module 11). Keycloak tourne pourtant dans Lab-Services : **présence d’un fournisseur d’identité ne veut pas dire fédération active**.
+✅ **Observé :** deux listes vides, tant que la fédération Keycloak n’est pas configurée (module 11). Keycloak tourne pourtant dans Lab-Services : **présence d’un fournisseur d’identité ne veut pas dire fédération active**.
 
 ### 1.5.4 Politique de mots de passe
 
@@ -300,7 +359,7 @@ openstack mapping list
 $K exec keystone-0 -c keystone -- sh -c 'grep -E "^\[security_compliance\]" -A15 /etc/keystone/keystone.conf'
 ```
 
-✅ **Attendu :** section absente ou réglages par défaut (pas de verrouillage, pas d’expiration). À comparer avec les recommandations de l’ANSSI vues au module 11.
+✅ **Observé :** aucune ligne, et `command terminated with exit code 1` (`grep` n’a rien trouvé) : la section est **absente**, donc réglages par défaut : pas de verrouillage après échecs, pas d’expiration des mots de passe. À comparer avec les recommandations de l’ANSSI vues au module 11.
 
 ### Simulation : un utilisateur change son mot de passe
 
@@ -308,11 +367,27 @@ $K exec keystone-0 -c keystone -- sh -c 'grep -E "^\[security_compliance\]" -A15
 openstack user create lab-pwtest --domain users --password "$LAB_PW"
 openstack role add --user lab-pwtest --user-domain users --project demo --project-domain users member
 os_as lab-pwtest users projet demo users -- user password set --original-password "$LAB_PW" --password "${LAB_PW}-2"
+```
+
+⚠ **Observé :** avec le client `openstack` 7.5.0 du lab, cette commande **plante** : `Proxy.update_user() missing 1 required positional argument: 'user'`. C’est un défaut du client, pas de Keystone : le mot de passe n’est pas changé. On passe donc par l’**API**, ce que fait de toute façon le client :
+
+```bash
+USER_ID=$(openstack user show lab-pwtest --domain users -f value -c id)
+[ -n "$USER_ID" ] || echo "ATTENTION : identifiant vide, relancer la commande precedente"
+T=$(os_as lab-pwtest users projet demo users -- token issue -f value -c id)
+curl -s -o /dev/null -w "changement : %{http_code}\n" -X POST "$OS_AUTH_URL/users/$USER_ID/password" \
+  -H "X-Auth-Token: $T" -H "Content-Type: application/json" \
+  -d "{\"user\": {\"original_password\": \"$LAB_PW\", \"password\": \"${LAB_PW}-2\"}}"
 LAB_PW="${LAB_PW}-2" os_as lab-pwtest users projet demo users -- token issue -c expires
 openstack user delete lab-pwtest --domain users
 ```
 
-✅ **Attendu :** le changement réussit, le nouveau mot de passe fonctionne. ⚠ **Piège :** `os_as` lit `LAB_PW` ; d’où le `LAB_PW=… os_as` sur une seule ligne pour ne pas modifier la variable de la session.
+✅ **Attendu** (variante par l’API **pas encore rejouée** sur le lab) : `changement : 204`, puis un jeton obtenu avec le nouveau mot de passe. Un utilisateur change son mot de passe avec **son propre** jeton, en prouvant qu’il connaît l’ancien.
+
+⚠ **Pièges :**
+
+- si `USER_ID` est vide (commande précédente en échec), la requête part vers `…/v3/users/password` et Keystone répond `500` (constaté dans son journal) ;
+- `os_as` lit `LAB_PW` : d’où le `LAB_PW=… os_as` sur une seule ligne, pour ne pas modifier la variable de la session.
 
 ---
 
@@ -329,7 +404,17 @@ for pc in keystone-0/keystone:/etc/keystone/keystone.conf nova-0/nova-api:/etc/n
 done
 ```
 
-Note le résultat dans ce tableau, il conditionne les TP 2 à 4 :
+✅ **Observé :** les cinq services répondent `(valeurs par defaut)` : aucun ne fixe ces options dans son fichier.
+
+« Valeurs par défaut » : pour les lire, génère la configuration de référence de la bibliothèque de politiques :
+
+```bash
+$K exec keystone-0 -c keystone -- oslo-config-generator --namespace oslo.policy 2>/dev/null | grep -B2 -A2 -E "^#enforce_(scope|new_defaults)"
+```
+
+✅ **Observé :** `#enforce_scope = false` et `#enforce_new_defaults = false`.
+
+⚠ Ce sont les défauts de la **bibliothèque** ; un service peut les surcharger dans son code. La preuve se lit dans les règles (§ 1.6.2) et dans les essais des TP 2 à 4. Note le résultat :
 
 | Service | `enforce_scope` | `enforce_new_defaults` |
 |---|---|---|
@@ -338,12 +423,6 @@ Note le résultat dans ce tableau, il conditionne les TP 2 à 4 :
 | Neutron | | |
 | Glance | | |
 | Placement | | |
-
-« Valeurs par défaut » : la valeur dépend de la version du service. Pour la lire, génère la configuration effective :
-
-```bash
-$K exec keystone-0 -c keystone -- oslo-config-generator --namespace oslo.policy 2>/dev/null | grep -B2 -A2 -E "^#enforce_(scope|new_defaults)"
-```
 
 | Si… | Alors |
 |---|---|
@@ -358,9 +437,28 @@ $K exec keystone-0 -c keystone -- oslopolicy-policy-generator --namespace keysto
   | grep -E '"identity:(list_users|create_user|list_projects|create_project|create_grant)"'
 ```
 
-✅ **Attendu :** des règles du type `"identity:list_users": "(role:reader and system_scope:all) or (role:reader and domain_id:%(target.domain_id)s)"` (le texte exact dépend de la version).
+✅ **Observé sur le lab :**
 
-Lecture : **lister les utilisateurs** est permis à qui a `reader` **sur le système**, ou `reader` **sur le domaine** des utilisateurs listés.
+```text
+"identity:create_grant": "(rule:admin_required) or ((role:admin and domain_id:%(target.user.domain_id)s and domain_id:%(target.project.domain_id)s) or …"
+"identity:list_projects": "(rule:admin_required) or (role:reader and system_scope:all) or (role:reader and domain_id:%(target.domain_id)s)"
+"identity:create_project": "rule:admin_required"
+"identity:list_users": "(rule:admin_required) or (role:reader and system_scope:all) or (role:reader and domain_id:%(target.domain_id)s)"
+"identity:create_user": "rule:admin_required"
+```
+
+**Comment le lire :**
+
+| Règle | Qui peut |
+|---|---|
+| `list_users`, `list_projects` | Un `admin` (`rule:admin_required`), **ou** un `reader` sur le système, **ou** un `reader` sur le domaine visé |
+| `create_user`, `create_project` | **Seulement** un `admin` |
+| `create_grant` (donner un rôle) | Un `admin`, éventuellement limité au domaine de l’utilisateur et de la cible |
+
+Deux conclusions, essentielles pour la suite :
+
+1. **`rule:admin_required` est en tête de chaque règle**, et il ne regarde pas la portée : un rôle `admin`, **n’importe où**, suffit. C’est la marque des anciennes règles (`enforce_new_defaults = false`), et l’origine du « admin quelque part, admin partout » (TP 2, § 2.3).
+2. **Aucune règle ne mentionne `manager`** : sur ce Keystone, un gestionnaire de domaine ne peut ni créer de comptes ni créer de projets. Le TP 2 (§ 2.4) le vérifie.
 
 Même exercice pour Nova et Neutron :
 
@@ -368,6 +466,17 @@ Même exercice pour Nova et Neutron :
 $K exec nova-0 -c nova-api -- oslopolicy-policy-generator --namespace nova 2>/dev/null | grep -E '"os_compute_api:(servers:create|os-hypervisors:list)"'
 $K exec neutron-0 -c neutron-server -- oslopolicy-policy-generator --namespace neutron 2>/dev/null | grep -E '"(create_network|create_network:shared)"'
 ```
+
+✅ **Observé :**
+
+```text
+"os_compute_api:os-hypervisors:list": "rule:context_is_admin"
+"os_compute_api:servers:create": "rule:project_member_or_admin"
+"create_network": "(rule:admin_only) or (role:member and project_id:%(project_id)s)"
+"create_network:shared": "rule:admin_only"
+```
+
+Lister les hyperviseurs : réservé à l’administrateur ; créer une VM : membre du projet ou administrateur ; créer un réseau : administrateur, ou `member` **du projet** ; le rendre partagé : administrateur seulement.
 
 ❓ **Question :** pourquoi `create_network:shared` a-t-il une règle distincte de `create_network` ? *Réponse : un réseau partagé est visible par tous les projets ; c’est une action d’administration, alors que créer un réseau privé est un droit de membre.*
 
@@ -381,7 +490,15 @@ openstack network create lab-partage --share
 source ~/admin-openrc
 ```
 
-⛔ **Refus attendu** pour les trois, avec un code `403` (« You are not authorized… » ou « Policy doesn’t allow… »). L’apprenant relie chaque refus à la règle lue en 1.6.2.
+⛔ **Refus observés** pour les trois, avec un code `403` :
+
+```text
+ForbiddenException: 403: … You are not authorized to perform the requested action: identity:list_users.
+ForbiddenException: 403: … Policy doesn't allow os_compute_api:os-hypervisors:list-detail to be performed.
+Error while executing command: ForbiddenException: 403, (rule:create_network and rule:create_network:shared) is disallowed by policy
+```
+
+Chaque message **nomme la règle** refusée : l’apprenant la relie à celle lue en 1.6.2.
 
 | Code | Signification |
 |---|---|
@@ -399,14 +516,21 @@ source ~/admin-openrc
 $K logs keystone-0 -c keystone --since=2m | grep -E " 403 |Forbidden|not authorized" | tail -3
 ```
 
-✅ **Attendu :** l’identifiant de requête renvoyé au client se retrouve dans les journaux de Keystone, avec le refus.
+✅ **Observé :** le client reçoit `RESP: [403] … X-Openstack-Request-Id: req-40a5efb0-…` ; le journal de Keystone contient la même requête :
+
+```text
+… ERROR keystone.server.flask.application [None req-40a5efb0-a28e-4ac4-a530-625bd7acda2a …] keystone.exception.ForbiddenAction: You are not authorized to perform the requested action: identity:list_users.
+… "GET /openstack-keystone/v3/users HTTP/1.1" 403 132 …
+```
+
+L’identifiant de requête relie le refus vu par l’utilisateur à la ligne du serveur.
 
 ---
 
 ## Nettoyage
 
 ```bash
-rm -f /tmp/auth-projet.json /tmp/auth-sans-portee.json /tmp/token-body.json /tmp/token-headers.txt
+rm -f /tmp/auth-projet.json /tmp/auth-defaut.json /tmp/auth-sans-portee.json /tmp/token-body.json /tmp/token-headers.txt
 openstack user delete lab-pwtest --domain users 2>/dev/null
 ```
 

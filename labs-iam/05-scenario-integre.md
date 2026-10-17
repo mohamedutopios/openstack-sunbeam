@@ -1,6 +1,6 @@
 # TP 5 : scénario intégré, mettre en service et auditer un SI cloisonné
 
-> Statut : rédigé, **pas encore rejoué sur le lab**. Voir les conventions dans [README.md](README.md).
+> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
 
 **Modules du support :** 8 à 12.
 **Durée :** 3 h (1 h 30 de mise en œuvre, 30 min d’audit, 1 h d’incidents).
@@ -51,13 +51,26 @@ openstack role add --user gaelle --user-domain lab-globex --domain lab-globex ma
 openstack role assignment list --domain lab-globex --names
 ```
 
-✅ **Attendu :** `gaelle@lab-globex` → `manager` sur le domaine `lab-globex`. C’est la **seule** affectation que la plateforme fait sur Globex.
+✅ **Attendu :** `gaelle@lab-globex` → `manager` sur le domaine `lab-globex`. Dans le modèle Secure RBAC, c’est la **seule** affectation que la plateforme fait sur Globex ; sur ce lab, elle devra aussi faire la phase 2 à la place de Gaëlle.
 
 ### Phase 2 : la gestionnaire organise son domaine (compte `gaelle`, jeton de domaine)
 
-```bash
-G() { os_as gaelle lab-globex domaine lab-globex -- "$@"; }
+Dans le modèle Secure RBAC, c’est Gaëlle qui fait cette phase. **Sur ce lab, elle ne le peut pas** : Keystone réserve la création de projets, de comptes et d’affectations au rôle `admin` (et sans doute celle des groupes, règle non lue) (TP 1, § 1.6.2 ; TP 2, § 2.4). On le constate d’abord sur une commande :
 
+```bash
+os_as gaelle lab-globex domaine lab-globex -- project create globex-si --domain lab-globex
+```
+
+⛔ **Refus attendu (403)** sur ce lab (à confirmer). On fait alors faire la phase par la plateforme, **avec les mêmes commandes** : la fonction `G` désigne qui agit. Choisir **une** des deux lignes :
+
+```bash
+G() { openstack "$@"; }                                          # ce lab : la plateforme agit pour Gaelle
+# G() { os_as gaelle lab-globex domaine lab-globex -- "$@"; }   # Keystone avec regles pour manager
+```
+
+Puis :
+
+```bash
 G project create globex-si --domain lab-globex --description "Racine Globex"
 G project create globex-prod --domain lab-globex --parent globex-si --tag env:prod
 G project create globex-dev --domain lab-globex --parent globex-si --tag env:dev
@@ -76,7 +89,7 @@ G role add --group globex-audit --group-domain lab-globex --domain lab-globex --
 G role assignment list --domain lab-globex --names
 ```
 
-⚖ **dépend de Secure RBAC :** toutes ces commandes doivent réussir avec le profil de gestionnaire de domaine de Keystone 2024.1. Si l’une échoue en `403`, noter laquelle : c’est une limite du profil `manager` sur ce lab, à faire par la plateforme.
+✅ **Attendu :** avec `G` = `openstack`, toutes les commandes réussissent. Avec `G` = Gaëlle, sur ce lab, elles échoueraient en `403` : c’est une limite du rôle `manager` de ce Keystone, à faire relever dans l’évaluation (partie E).
 
 ✅ **Attendu (corrigé du livrable) :**
 
@@ -148,7 +161,15 @@ Les apprenants vérifient chaque exigence du cahier des charges par une commande
 | 9 | Le compte de supervision ne fait que lire | `os_appcred "$AC_ID" "$AC_SECRET" -- network create globex-intrus` | ⛔ 403 |
 | 10 | Il expire sous 30 jours | `os_as ines lab-globex projet globex-prod lab-globex -- application credential show globex-supervision -c expires_at` | date à J+30 |
 
-⚖ Les lignes 1, 2, 4, 5 et 9 **dépendent de Secure RBAC**. Si l’une passe au lieu d’être refusée, l’apprenant doit l’expliquer à partir du relevé du TP 1 (§ 1.6.1).
+Les refus attendus sont cohérents avec les règles lues au TP 1 (§ 1.6.2), même sans Secure RBAC complet :
+
+| Lignes | Règle qui refuse |
+|---|---|
+| 1 | `list_users` n’accepte `reader` que sur le domaine visé (`users` n’est pas celui de Gaëlle) |
+| 2 | `create_grant` exige `admin` |
+| 4, 5, 9 | `create_network` exige `member` du projet ; `reader` n’implique pas `member` |
+
+Si l’une passe au lieu d’être refusée, l’apprenant doit l’expliquer à partir des règles du TP 1.
 
 ---
 
@@ -197,7 +218,7 @@ Le formateur injecte un incident à la fois, **sans dire lequel**. L’apprenant
 | Critère | Points |
 |---|---|
 | Livrable (arbre et affectations) conforme avant la mise en œuvre | 4 |
-| Chaque phase faite par le bon acteur (plateforme, gestionnaire, membre) | 3 |
+| Chaque phase faite par le bon acteur (plateforme, gestionnaire, membre), et limite du rôle `manager` sur ce lab constatée et expliquée | 3 |
 | Droits donnés par groupes uniquement | 2 |
 | Quotas conformes | 1 |
 | Identifiant d’application en lecture seule, avec expiration | 2 |

@@ -1,6 +1,6 @@
 # TP 2 : les domaines
 
-> Statut : rédigé, **pas encore rejoué sur le lab**. Voir les conventions dans [README.md](README.md).
+> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 9, les domaines dans OpenStack.
 **Durée :** 2 h.
@@ -119,9 +119,9 @@ os_as bruno acme projet acme-si acme -- project list --domain admin_domain
 openstack role remove --user bruno --user-domain acme --project acme-si --project-domain acme admin
 ```
 
-⚖ **dépend de Secure RBAC :** les commandes de Bruno **réussissent** dans la plupart des configurations. Le rôle `admin` n’est pas contenu par la cible sur laquelle il est donné : Bruno voit le partenaire et le domaine de la plateforme. C’est la démonstration de « admin quelque part, admin partout ». On retire tout de suite ce rôle.
+✅ **Attendu sur ce lab** (déduit des règles lues au TP 1, § 1.6.2 ; à confirmer en jouant le TP) : les deux commandes de Bruno **réussissent**. Les règles `identity:list_users` et `identity:list_projects` commencent par `rule:admin_required`, qui accepte un rôle `admin` **quelle que soit sa cible** : Bruno, `admin` d’un simple projet d’Acme, voit les comptes du partenaire et les projets de la plateforme. C’est la démonstration de « admin quelque part, admin partout ». On retire tout de suite ce rôle.
 
-⚠ **Piège :** ne jamais donner `admin` à un client ou à un gestionnaire de domaine. Le bon outil est le rôle `manager` sur le domaine (§ 2.4).
+⚠ **Piège :** ne jamais donner `admin` à un client ou à un gestionnaire de domaine. Le rôle prévu pour déléguer est `manager` sur le domaine (§ 2.4) ; on va voir ce qu’il permet réellement sur ce lab.
 
 ---
 
@@ -135,7 +135,7 @@ openstack role add --user bruno --user-domain acme --domain acme manager
 openstack role assignment list --user bruno --user-domain acme --names
 ```
 
-✅ **Attendu :** `bruno@acme` → `manager` sur le domaine `acme`. Si le rôle `manager` est absent, voir la variante en fin de paragraphe.
+✅ **Attendu :** `bruno@acme` → `manager` sur le domaine `acme`. Le rôle `manager` existe sur le lab (TP 1, § 1.2), dans la chaîne `admin` → `manager` → `member` → `reader`.
 
 Bruno obtient un **jeton de domaine** :
 
@@ -143,21 +143,54 @@ Bruno obtient un **jeton de domaine** :
 os_as bruno acme domaine acme -- token issue -c domain_id -c expires
 ```
 
-### Ce que Bruno doit pouvoir faire
+✅ **Attendu :** un jeton avec le `domain_id` d’`acme` : Bruno a un rôle sur ce domaine, il peut donc en obtenir la portée.
 
-⚖ **dépend de Secure RBAC** pour tout ce paragraphe : les résultats ci-dessous sont ceux du profil « gestionnaire de domaine » de Keystone 2024.1.
+### Ce qu’un gestionnaire de domaine devrait pouvoir faire
+
+Dans le modèle Secure RBAC (support, module 12), un gestionnaire de domaine crée les comptes et les projets de son domaine, et leur donne `reader`, `member` ou `manager`. On le vérifie :
 
 ```bash
 os_as bruno acme domaine acme -- user list --domain acme
 os_as bruno acme domaine acme -- user create chloe --domain acme --password "$LAB_PW" --description "Chloe, developpeuse"
-os_as bruno acme domaine acme -- user create emma --domain acme --password "$LAB_PW" --description "Emma, exploitation"
-os_as bruno acme domaine acme -- user create david --domain acme --password "$LAB_PW" --description "David, auditeur"
 os_as bruno acme domaine acme -- project create acme-dev --domain acme --parent acme-si
-os_as bruno acme domaine acme -- role add --user chloe --user-domain acme --project acme-dev --project-domain acme member
 os_as bruno acme domaine acme -- role assignment list --domain acme --names
 ```
 
-✅ **Attendu :** Bruno crée les comptes et les projets d’Acme, et donne `member` à Chloé.
+✅ **Attendu sur ce lab** (déduit des règles lues au TP 1, § 1.6.2 ; à confirmer) :
+
+| Commande | Résultat attendu | Règle en cause |
+|---|---|---|
+| `user list --domain acme` | ✅ réussit | `list_users` accepte `reader` sur le domaine visé ; `manager` implique `reader` |
+| `user create chloe` | ⛔ `403` | `identity:create_user` = `rule:admin_required` : **seulement** `admin` |
+| `project create acme-dev` | ⛔ `403` | `identity:create_project` = `rule:admin_required` |
+| `role assignment list --domain acme` | à relever | Règle non lue au TP 1 : `oslopolicy-policy-generator … \| grep list_role_assignments` |
+
+**Conclusion à faire tirer aux apprenants :** sur ce Keystone, aucune règle ne mentionne `manager` (TP 1, § 1.6.2). Un gestionnaire de domaine y est, en pratique, un **lecteur** de son domaine. La délégation de la gestion des identités n’est pas possible telle quelle :
+
+| Option | Effet sur ce lab |
+|---|---|
+| `manager` sur le domaine | Lecture seule du domaine : pas de délégation |
+| `admin` sur le domaine ou sur un projet | Tout est permis, **partout** (§ 2.3) : délégation sans plafond, inacceptable |
+| Politique personnalisée de Keystone (règles pour `manager`) | Possible, mais hors du périmètre de Sunbeam (le charm gère la configuration de Keystone) |
+
+La gestion des comptes reste donc à la **plateforme**. C’est elle qui crée maintenant les comptes et le projet dont les TP suivants ont besoin :
+
+```bash
+for u in chloe emma david; do
+  openstack user show "$u" --domain acme >/dev/null 2>&1 || openstack user create "$u" --domain acme --password "$LAB_PW"
+done
+openstack user set chloe --domain acme --description "Chloe, developpeuse"
+openstack user set emma --domain acme --description "Emma, exploitation"
+openstack user set david --domain acme --description "David, auditeur"
+openstack project show acme-dev --domain acme >/dev/null 2>&1 || openstack project create acme-dev --domain acme --parent acme-si
+openstack role add --user chloe --user-domain acme --project acme-dev --project-domain acme member
+openstack role assignment list --domain acme --names
+openstack role assignment list --project acme-dev --project-domain acme --names
+```
+
+Les `show … || create` évitent une erreur si un compte ou le projet existe déjà, par exemple si la création par Bruno a finalement réussi sur ton lab.
+
+✅ **Attendu :** les trois comptes dans `acme`, le projet `acme-dev` sous `acme-si`, et `chloe@acme` → `member` sur `acme-dev`.
 
 ### Ce que Bruno ne doit pas pouvoir faire
 
@@ -170,30 +203,32 @@ os_as bruno acme domaine acme -- domain create acme2
 os_as bruno acme domaine acme -- hypervisor list
 ```
 
-⛔ **Refus attendu (403)** pour chacune :
+⛔ **Refus attendu (403)** pour chacune (déduit des règles du TP 1 ; à confirmer) :
 
 | Tentative | Pourquoi c’est refusé |
 |---|---|
-| Lister ou créer des comptes du partenaire | Hors de son domaine |
-| Donner `admin` à Chloé ou à lui-même | Un gestionnaire ne délègue que `reader`, `member` et `manager` : il ne peut pas fabriquer d’administrateur |
-| Créer un domaine | Action de la plateforme (portée système) |
-| Lister les hyperviseurs | Action de la plateforme |
+| Lister les comptes du partenaire | `list_users` n’accepte `reader` que sur **le domaine visé** : `partenaire` n’est pas le sien |
+| Créer un compte chez le partenaire | `create_user` exige `admin` |
+| Donner `admin` à Chloé ou à lui-même | `create_grant` exige `admin` : il ne peut pas fabriquer d’administrateur |
+| Créer un domaine | Réservé à `admin` |
+| Lister les hyperviseurs | `os-hypervisors:list` = `rule:context_is_admin` |
+
+Ces refus sont ceux qu’on souhaite. Le problème de ce lab est ailleurs : Bruno est aussi refusé pour ce qu’il **devrait** pouvoir faire (paragraphe précédent).
 
 ❓ **Question :** pourquoi est-il essentiel que Bruno ne puisse pas se donner `admin` ? *Réponse : sinon la délégation n’a pas de plafond ; un gestionnaire compromis deviendrait administrateur de toute la plateforme (§ 2.3).*
-
-⚠ **Variante si les refus n’ont pas lieu :** relève dans le tableau du § 1.6.1 si `enforce_scope` et `enforce_new_defaults` sont actifs pour Keystone. Sans eux, le rôle `manager` n’a pas de règles propres et la délégation n’est pas bornée : c’est exactement ce que Secure RBAC corrige. Note l’écart pour le présenter aux apprenants.
-
-**Variante si `manager` n’existe pas :** `openstack role create manager`, puis `openstack implied role create manager --implied-role member`. Les règles de Keystone 2024.1 reconnaissent le rôle par son nom.
 
 ### Le partenaire, par symétrie
 
 ```bash
 openstack role add --user bruno --user-domain partenaire --domain partenaire manager
-os_as bruno partenaire domaine partenaire -- project create partenaire-app --domain partenaire
+openstack project create partenaire-app --domain partenaire
+os_as bruno partenaire domaine partenaire -- project list --domain partenaire
 os_as bruno partenaire domaine partenaire -- user list --domain acme
 ```
 
-✅ **Attendu :** le Bruno du partenaire gère son domaine. ⛔ **Refus attendu** sur la liste des comptes d’Acme. Deux gestionnaires homonymes, deux périmètres étanches.
+Le projet `partenaire-app` est créé par la plateforme, pour la raison vue plus haut.
+
+✅ **Attendu** (à confirmer) : le Bruno du partenaire **voit** son domaine (`project list --domain partenaire`). ⛔ **Refus attendu (403)** sur la liste des comptes d’Acme. Deux gestionnaires homonymes, deux périmètres de lecture étanches.
 
 ---
 
@@ -201,17 +236,18 @@ os_as bruno partenaire domaine partenaire -- user list --domain acme
 
 Exercice en groupe : pour chaque tâche, les apprenants indiquent qui la fait, puis le vérifient sur le lab quand c’est possible.
 
-| Tâche | Plateforme (admin) | Gestionnaire de domaine (manager) | Vérification |
-|---|---|---|---|
-| Créer le domaine `acme` | ✅ | ⛔ | § 2.4 |
-| Créer un utilisateur dans `acme` | ✅ | ✅ | § 2.4 |
-| Créer un projet dans `acme` | ✅ | ✅ | § 2.4 |
-| Donner `member` sur un projet d’Acme | ✅ | ✅ | § 2.4 |
-| Donner `admin` | ✅ | ⛔ | § 2.4 |
-| Fixer les quotas d’un projet d’Acme | ✅ | ⛔ | TP 3 |
-| Créer un réseau partagé, un flavor public | ✅ | ⛔ | TP 4 |
-| Ajouter un hyperviseur, modifier le catalogue | ✅ | ⛔ | — |
-| Brancher l’annuaire d’Acme (LDAP, fédération) | ✅ | ⛔ | module 11 |
+| Tâche | Plateforme (admin) | Gestionnaire de domaine : modèle Secure RBAC | Gestionnaire de domaine : **ce lab** | Vérification |
+|---|---|---|---|---|
+| Créer le domaine `acme` | ✅ | ⛔ | ⛔ | § 2.4 |
+| Lister les comptes d’`acme` | ✅ | ✅ | ✅ | § 2.4 |
+| Créer un utilisateur dans `acme` | ✅ | ✅ | ⛔ | § 2.4 |
+| Créer un projet dans `acme` | ✅ | ✅ | ⛔ | § 2.4 |
+| Donner `member` sur un projet d’Acme | ✅ | ✅ | ⛔ | § 2.4 |
+| Donner `admin` | ✅ | ⛔ | ⛔ | § 2.4 |
+| Fixer les quotas d’un projet d’Acme | ✅ | ⛔ | ⛔ | TP 3 |
+| Créer un réseau partagé, un flavor public | ✅ | ⛔ | ⛔ | TP 4 |
+| Ajouter un hyperviseur, modifier le catalogue | ✅ | ⛔ | ⛔ | — |
+| Brancher l’annuaire d’Acme (LDAP, fédération) | ✅ | ⛔ | ⛔ | module 11 |
 
 ---
 
@@ -271,7 +307,7 @@ Depuis Windows, ouvre `http://cloud.lab.test/openstack-horizon` et connecte-toi 
 |---|---|
 | Domaines | `acme`, `partenaire` |
 | Projets | `acme-si`, `acme-dev` (enfant d’`acme-si`) ; `partenaire-app` |
-| Utilisateurs | `bruno`, `chloe`, `emma`, `david` dans `acme` ; `bruno` dans `partenaire` |
+| Utilisateurs | `bruno`, `chloe`, `emma`, `david` dans `acme` (les trois derniers créés par la plateforme, § 2.4) ; `bruno` dans `partenaire` |
 | Affectations | `bruno@acme` manager d’`acme` ; `chloe` member d’`acme-dev` ; `bruno@partenaire` manager de `partenaire` |
 | Rôle propre | `acme-facturation` (implique `reader`) |
 

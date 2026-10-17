@@ -1,6 +1,6 @@
 # TP 4 : rôles et moindre privilège
 
-> Statut : rédigé, **pas encore rejoué sur le lab**. Voir les conventions dans [README.md](README.md).
+> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 12, rôles et moindre privilège.
 **Durée :** 2 h 30.
@@ -21,7 +21,9 @@ openstack role list
 openstack implied role list
 ```
 
-✅ **Attendu :** une chaîne `admin` → `manager` → `member` → `reader` (le rôle de gauche implique celui de droite), et un rôle `service`. Si `manager` est absent de la chaîne, la créer (voir TP 2, § 2.4, variante).
+✅ **Attendu** (observé au TP 1) : une chaîne `admin` → `manager` → `member` → `reader` (le rôle de gauche implique celui de droite), et un rôle `service`.
+
+⚠ Sur ce lab, les règles de Keystone ne donnent **aucun droit propre** à `manager` (TP 1, § 1.6.2 ; TP 2, § 2.4) : il vaut `member` sur un projet, et `reader` sur un domaine. La colonne « Secure RBAC » du tableau ci-dessous décrit le modèle ; la matrice du § 4.2 montre ce que fait réellement le lab.
 
 | Rôle | Pour qui | Ce qu’il permet (Secure RBAC) |
 |---|---|---|
@@ -92,17 +94,20 @@ EOF
 bash ~/labs-iam/matrice.sh
 ```
 
-⚖ **dépend de Secure RBAC.** Résultat attendu avec Secure RBAC complet :
+⚖ **dépend des politiques.** Deux attendus : celui du modèle Secure RBAC complet, et celui de **ce lab**, déduit des règles lues au TP 1 (§ 1.6.2). « À relever » : la règle n’a pas été lue ; c’est la matrice qui répond.
 
-| Opération | reader | member | manager |
-|---|---|---|---|
-| Lister les instances, les réseaux | ✅ | ✅ | ✅ |
-| Créer un réseau privé, un groupe de sécurité, un volume | ⛔ | ✅ | ✅ |
-| Créer un réseau partagé | ⛔ | ⛔ | ⛔ |
-| Lister les affectations du projet | ⛔ | ⛔ | ✅ |
-| Donner `reader` à un autre compte sur le projet | ⛔ | ⛔ | ✅ |
-| Modifier les quotas | ⛔ | ⛔ | ⛔ |
-| Lister les hyperviseurs, créer une image publique | ⛔ | ⛔ | ⛔ |
+| Opération | Secure RBAC : reader | member | manager | **Ce lab** : reader | member | manager |
+|---|---|---|---|---|---|---|
+| Lister les instances, les réseaux | ✅ | ✅ | ✅ | à relever | ✅ | ✅ |
+| Créer un réseau privé | ⛔ | ✅ | ✅ | ⛔ | ✅ | ✅ |
+| Créer un groupe de sécurité, un volume | ⛔ | ✅ | ✅ | à relever | ✅ | ✅ |
+| Créer un réseau partagé | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
+| Lister les affectations du projet | ⛔ | ⛔ | ✅ | à relever | à relever | à relever |
+| Donner `reader` à un autre compte sur le projet | ⛔ | ⛔ | ✅ | ⛔ | ⛔ | ⛔ |
+| Modifier les quotas | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
+| Lister les hyperviseurs, créer une image publique | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
+
+Justifications pour ce lab : `create_network` exige `member` du projet ; `create_network:shared` et `os-hypervisors:list` exigent l’administrateur ; `identity:create_grant` exige `admin` (d’où le refus pour `manager`, contrairement au modèle).
 
 ❓ **Questions :**
 
@@ -176,7 +181,16 @@ os_as lab-supervision admin_domain systeme -- hypervisor list
 os_as lab-supervision admin_domain systeme -- project create lab-interdit --domain acme
 ```
 
-⚖ **dépend de Secure RBAC :** avec les portées appliquées, les trois lectures réussissent et la création est ⛔ **refusée (403)**.
+✅ **Attendu sur ce lab** (déduit des règles du TP 1 ; à confirmer) :
+
+| Commande | Résultat | Règle |
+|---|---|---|
+| `token issue` (portée système) | ✅ jeton avec `system` | Le compte a un rôle sur le système : il peut en obtenir la portée |
+| `project list`, `user list --domain acme` | ✅ | `list_projects` et `list_users` acceptent `reader` sur le système |
+| `hypervisor list` | ⛔ `403` | `os-hypervisors:list` = `rule:context_is_admin` : Nova n’a pas de règle de lecture système sur ce lab |
+| `project create lab-interdit` | ⛔ `403` | `create_project` exige `admin` |
+
+Le compte de supervision lit bien l’**identité** de toute la plateforme, mais pas l’infrastructure de Nova : sur ce lab, Keystone connaît le lecteur système, Nova non.
 
 Le même compte n’a **aucun** rôle de projet : il ne peut pas obtenir de jeton de projet.
 
@@ -184,15 +198,17 @@ Le même compte n’a **aucun** rôle de projet : il ne peut pas obtenir de jeto
 os_as lab-supervision admin_domain projet acme-prod acme -- server list
 ```
 
-⛔ **Refus attendu (401).** ❓ **Question :** pourquoi ne peut-il pas lister les VM d’`acme-prod`, alors qu’il voit les hyperviseurs ? *Réponse : lister les instances d’un projet est une opération de **projet**. Pour une vue globale, l’API de Nova propose `server list --all-projects`, autorisée en lecture système.*
+⛔ **Refus attendu (401).** ❓ **Question :** pourquoi ne peut-il pas lister les VM d’`acme-prod`, alors qu’il a un rôle sur le système ? *Réponse : lister les instances d’un projet est une opération de **projet**, et il n’a aucun rôle sur ce projet. Pour une vue globale, l’API de Nova propose `server list --all-projects`, prévue en lecture système par Secure RBAC.*
 
 ```bash
 os_as lab-supervision admin_domain systeme -- server list --all-projects
 ```
 
+✅ **Attendu :** à relever. Avec Secure RBAC complet, la liste réussit ; sur ce lab, où Nova ne reconnaît pas le lecteur système pour les hyperviseurs, un refus `403` est probable. Faire relier le résultat à la règle : `oslopolicy-policy-generator --namespace nova | grep "servers:index:get_all_tenants"`.
+
 ### Simulation : la même opération sous trois portées
 
-`admin` dispose d’un jeton de projet (`admin-openrc`), et souvent d’un rôle système (vérifier avec `openstack role assignment list --system all --names`).
+`admin` dispose d’un jeton de projet (`admin-openrc`) et d’un rôle sur son domaine, mais **d’aucun rôle système** (TP 1, § 1.4.3).
 
 ```bash
 openstack hypervisor list
@@ -200,7 +216,13 @@ env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-system-scope all
 env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-domain-name admin_domain hypervisor list
 ```
 
-⚖ **dépend de Secure RBAC :** avec `enforce_scope = True` sur Nova, seule la deuxième réussit ; sinon, la première réussit aussi. Cette expérience montre aux apprenants **pourquoi** la portée existe : le même rôle `admin` ne doit pas avoir le même effet selon ce qu’il cible.
+| Portée | Secure RBAC complet (`enforce_scope = True`) | **Ce lab** (déduit ; à confirmer) |
+|---|---|---|
+| Projet `admin` | ⛔ refusé : la liste des hyperviseurs est une opération système | ✅ réussit : `rule:context_is_admin` ne regarde que le rôle `admin` |
+| Système | ✅ | ⛔ `401` : `admin` n’a aucun rôle système, pas de jeton |
+| Domaine `admin_domain` | ⛔ | ✅ probable, pour la même raison que la première ligne |
+
+Cette expérience montre aux apprenants **pourquoi** la portée existe : avec Secure RBAC, le même rôle `admin` n’a pas le même effet selon ce qu’il cible ; sur ce lab, il a le même effet partout.
 
 ---
 
@@ -299,7 +321,7 @@ openstack role assignment list --role admin --names
 openstack role assignment list --role admin --names --effective
 ```
 
-✅ **Attendu :** `admin` et les comptes de service, **aucun** compte d’`acme` ou de `partenaire`. ❓ **Question :** pourquoi regarder aussi la liste effective ? *Réponse : un rôle personnalisé qui implique `admin`, ou un groupe qui a `admin`, n’apparaît pas dans la liste simple.*
+✅ **Attendu :** `admin@admin_domain` (sur le projet `admin` et sur le domaine `admin_domain`), `_charm-keystone-admin@Default` (sur le système et le projet `admin` de `Default`), et les comptes de service sur `services` (TP 1, § 1.2) ; **aucun** compte d’`acme` ou de `partenaire`. ❓ **Question :** pourquoi regarder aussi la liste effective ? *Réponse : un rôle personnalisé qui implique `admin`, ou un groupe qui a `admin`, n’apparaît pas dans la liste simple.*
 
 ### Que peut faire un compte ?
 
