@@ -95,15 +95,16 @@ Exemple : `sunbeam cluster list -f yaml`
 
 | Groupe | Sert à | Utilisé dans |
 |---|---|---|
-| `cluster` | Lister, ajouter, retirer des nœuds ; mettre à jour | Démo 1, § 8 |
-| `deployment` | Voir les déploiements connus | Démo 1 |
-| `list-features`, `enable`, `disable` | Fonctionnalités optionnelles | Démos 1 et 5 |
-| `manifest` | Lire la configuration appliquée | Démos 1 et 4 |
-| `plans` | Voir les couches Terraform et leurs verrous | Démo 1 |
+| `utils juju-login` | Renouveler la session Juju | Démo 1, étape 0 |
+| `deployment` | Voir les déploiements connus | Démo 1, étape 1 |
+| `cluster` | Lister les nœuds ; en ajouter, en retirer ; mettre à jour | Démo 1, étape 2 ; § 8.2 |
+| `manifest` | Lire la configuration appliquée ; la générer en entier | Démo 1, étape 3 ; démo 4 |
+| `list-features`, `enable`, `disable` | Fonctionnalités optionnelles | Démo 1, étape 4 ; démo 5 |
+| `plans` | Voir les couches Terraform et leurs verrous | Démo 1, étape 5 ; § 8.2 |
 | `openrc`, `cloud-config`, `dashboard-url` | Récupérer les accès | Démo 2 |
 | `launch` | Lancer une VM de test | Démo 3 |
-| `utils juju-login` | Renouveler la session Juju | Démo 1, étape 0 |
-| `proxy`, `storage`, `identity`, `prepare-node-script`, `configure` | Configuration d’entreprise | § 8 |
+| `proxy`, `storage`, `identity`, `prepare-node-script`, `list-feature-gates` | Configuration d’entreprise | § 8 |
+| `bootstrap` | Installer le premier nœud d’un nouveau cloud | § 8.2 |
 
 ⚠ `sunbeam inspect`, cité dans d’anciennes documentations, **n’existe pas** dans cette version.
 
@@ -111,7 +112,18 @@ Exemple : `sunbeam cluster list -f yaml`
 
 ## 3. Démo 1 : faire le tour d’un cloud Sunbeam (15 min) ✅
 
-**Objectif :** en cinq commandes, savoir de quoi est fait le cloud, s’il est en bonne santé, et comment il a été configuré. C’est ce qu’on fait en arrivant sur un cloud inconnu, ou le matin avant une formation.
+**Objectif :** savoir de quoi est fait le cloud, s’il est en bonne santé, et comment il a été configuré. C’est ce qu’on fait en arrivant sur un cloud inconnu, ou le matin avant une formation.
+
+**La logique de l’ordre :** on va du plus général au plus détaillé, chaque étape s’appuyant sur la précédente.
+
+| Étape | Question | Commande |
+|---|---|---|
+| 0 | Ma session fonctionne-t-elle ? | `sunbeam utils juju-login` |
+| 1 | Sur **quel cloud** suis-je ? | `sunbeam deployment list` |
+| 2 | De **quelles machines** est-il fait, vont-elles bien ? | `sunbeam cluster list` |
+| 3 | Avec **quels réglages** a-t-il été installé ? | `sunbeam manifest show latest` |
+| 4 | Quels **services en plus** du socle ? | `sunbeam list-features` |
+| 5 | Une **opération** est-elle en cours ou bloquée ? | `sunbeam plans list` |
 
 ### Étape 0 : renouveler la session Juju
 
@@ -131,55 +143,9 @@ Juju re-login complete.
 
 **Si tu vois autre chose :** si tu oublies cette étape, la commande suivante peut répondre `Error: Failed to login to Juju Controller`. Ce n’est **pas une panne** : relance `sunbeam utils juju-login`, puis la commande.
 
-### Étape 1 : les nœuds et leurs rôles
+### Étape 1 : le déploiement
 
-**À quoi ça sert :** savoir combien de machines composent le cloud, ce que chacune fait, et si chaque rôle fonctionne.
-
-```bash
-sunbeam cluster list
-```
-
-**La commande, mot par mot :** `cluster` = le groupe des nœuds ; `list` = lister. Ajoute `-f yaml` pour une sortie exploitable par un script.
-
-**Ce que tu vois** (relevé le 16 octobre) :
-
-```text
-                          openstack-machines
-┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
-┃ Node    ┃ Machine ┃ Cluster ┃ Compute ┃ Control ┃ Network ┃ Storage ┃
-┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
-│ sunbeam │ running │ ONLINE  │ active  │ active  │         │ blocked │
-└─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
-```
-
-**Comment le lire :**
-
-| Colonne | Valeur | Signification |
-|---|---|---|
-| Titre `openstack-machines` | | Le modèle Juju qui décrit les machines |
-| `Node` | `sunbeam` | Le nom du nœud ; **une ligne par machine** du cluster |
-| `Machine` | `running` | La machine est connue de Juju et son agent tourne |
-| `Cluster` | `ONLINE` | Le nœud est membre du cluster Sunbeam (clusterd) et répond |
-| `Compute` | `active` | Le rôle **calcul** fonctionne : l’hyperviseur peut héberger des VM |
-| `Control` | `active` | Le rôle **contrôle** fonctionne : Kubernetes, qui porte les services OpenStack |
-| `Network` | *(vide)* | Ce nœud **n’a pas** le rôle réseau dédié ; c’est normal sur un nœud unique |
-| `Storage` | `blocked` | Le rôle **stockage** (MicroCeph) signale un problème |
-
-**Si tu vois autre chose :**
-
-| Valeur | Signification | Que faire |
-|---|---|---|
-| `active` partout (sauf colonnes vides) | Tout va bien | Rien |
-| `blocked` | Le charm du rôle a besoin d’une intervention | `juju status -m admin/openstack-machines` pour lire le message (guide `4-juju-cli/`, démo 4) |
-| `waiting`, `maintenance` | Le rôle démarre ou se configure | Attendre quelques minutes, puis relancer |
-| `Cluster` différent de `ONLINE` | Le nœud ne répond plus au cluster | Vérifier que la machine est démarrée et joignable |
-| Colonne vide | Le nœud n’a pas ce rôle | Normal si c’est voulu |
-
-Le 16 octobre, `Storage: blocked` venait du charm MicroCeph, resté bloqué après un démarrage lent alors que Ceph fonctionnait. Il a été réparé le 17 octobre : depuis, la colonne doit indiquer `active` (voir guide `5-openstack-cli/`, démo 6).
-
-### Étape 2 : le déploiement
-
-**À quoi ça sert :** savoir quel cloud la commande `sunbeam` pilote. Une même machine d’administration peut gérer plusieurs clouds ; `sunbeam` travaille toujours sur le déploiement **courant**.
+**À quoi ça sert :** savoir quel cloud la commande `sunbeam` pilote. Une même machine d’administration peut gérer plusieurs clouds ; `sunbeam` travaille toujours sur le déploiement **courant**. C’est donc la première question : toutes les étapes suivantes portent sur ce déploiement-là. Se tromper de cloud, c’est diagnostiquer, ou modifier, le mauvais.
 
 ```bash
 sunbeam deployment list
@@ -210,68 +176,57 @@ sunbeam deployment list
 
 ⚠ `sunbeam deployment show star-heron` (avec le **nom**, pas `local`) donne le détail, mais **affiche des secrets** : certificats, clé privée et fragments de mot de passe du contrôleur Juju. À ne pas projeter.
 
-### Étape 3 : les fonctionnalités activées
+### Étape 2 : les nœuds et leurs rôles
 
-**À quoi ça sert :** savoir quels services optionnels sont installés en plus du socle (Keystone, Nova, Neutron, Glance, Cinder, Horizon, Placement).
+**À quoi ça sert :** une fois le bon cloud identifié, savoir combien de machines le composent, ce que chacune fait, et si chaque rôle fonctionne.
 
 ```bash
-sunbeam list-features
+sunbeam cluster list
 ```
 
-**La commande, mot par mot :** `list-features` = lister les fonctionnalités et leur état. `-f yaml` donne une liste `nom: true/false`.
+**La commande, mot par mot :** `cluster` = le groupe des nœuds du déploiement courant ; `list` = lister. Ajoute `-f yaml` pour une sortie exploitable par un script.
 
-**Ce que tu vois :**
+**Ce que tu vois** (relevé le 17 octobre) :
 
 ```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
-┃ Feature                ┃ Enabled ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ vault                  │         │
-│ baremetal              │         │
-│ caas                   │         │
-│ dns                    │         │
-│ images-sync            │         │
-│ instance-recovery      │         │
-│ ldap                   │         │
-│ loadbalancer           │         │
-│ maintenance            │         │
-│ observability.embedded │         │
-│ observability.external │         │
-│ resource-optimization  │         │
-│ orchestration          │         │
-│ pro                    │         │
-│ shared-filesystem      │         │
-│ telemetry              │         │
-│ tls.ca                 │         │
-│ tls.self-signed        │         │
-│ tls.vault              │         │
-│ validation             │         │
-└────────────────────────┴─────────┘
+                          openstack-machines
+┏━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
+┃ Node    ┃ Cluster ┃ Machine ┃ Compute ┃ Control ┃ Network ┃ Storage ┃
+┡━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
+│ sunbeam │ ONLINE  │ running │ active  │ active  │         │ active  │
+└─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
 ```
 
 **Comment le lire :**
 
-- la colonne `Enabled` contient un `X` quand la fonctionnalité est activée ; **ici, aucune ne l’est** : le lab n’a que le socle ;
-- un nom avec un point est une **variante** : `tls.ca`, `tls.self-signed` et `tls.vault` sont trois façons d’activer TLS, dont une seule à la fois.
-
-| Fonctionnalité | Service ajouté | À quoi il sert |
+| Colonne | Valeur | Signification |
 |---|---|---|
-| `orchestration` | Heat | Créer une infrastructure entière à partir d’un modèle (démo 5) |
-| `loadbalancer` | Octavia | Répartiteurs de charge |
-| `secrets` / `vault` | Barbican / Vault | Coffres-forts de clés et certificats |
-| `tls.*` | — | Chiffrer les API (HTTPS) |
-| `ldap` | Keystone | Brancher un annuaire LDAP ou Active Directory |
-| `dns` | Designate | Noms DNS pour les VM |
-| `telemetry`, `observability.*` | Ceilometer, Gnocchi / Prometheus, Grafana | Métrologie, supervision |
-| `instance-recovery` | Masakari | Relancer les VM d’un hôte en panne |
-| `caas` | Magnum | Clusters Kubernetes à la demande |
-| `validation` | Tempest | Tests de conformité du cloud |
+| Titre `openstack-machines` | | Le modèle Juju qui décrit les machines |
+| `Node` | `sunbeam` | Le nom du nœud ; **une ligne par machine** du cluster |
+| `Cluster` | `ONLINE` | Le nœud est membre du cluster Sunbeam (clusterd) et répond |
+| `Machine` | `running` | La machine est connue de Juju et son agent tourne |
+| `Compute` | `active` | Le rôle **calcul** fonctionne : l’hyperviseur peut héberger des VM |
+| `Control` | `active` | Le rôle **contrôle** fonctionne : Kubernetes, qui porte les services OpenStack |
+| `Network` | *(vide)* | Ce nœud **n’a pas** le rôle réseau dédié ; c’est normal sur un nœud unique |
+| `Storage` | `active` | Le rôle **stockage** (MicroCeph) fonctionne |
 
-**Si tu vois autre chose :** un `X` sur une ligne = ce service est installé, ses API sont dans le catalogue (`openstack catalog list`).
+Ici, tout va bien : un nœud unique qui porte les rôles contrôle, calcul et stockage.
 
-### Étape 4 : la configuration appliquée
+**Si tu vois autre chose :**
 
-**À quoi ça sert :** retrouver les réglages essentiels du cloud (réseau de gestion, adresses des API) sans fouiller les fichiers.
+| Valeur | Signification | Que faire |
+|---|---|---|
+| `active` partout (sauf colonnes vides) | Tout va bien | Rien |
+| `blocked` | Le charm du rôle a besoin d’une intervention | `juju status -m admin/openstack-machines` pour lire le message (guide `4-juju-cli/`, démo 4) |
+| `waiting`, `maintenance` | Le rôle démarre ou se configure | Attendre quelques minutes, puis relancer |
+| `Cluster` différent de `ONLINE` | Le nœud ne répond plus au cluster | Vérifier que la machine est démarrée et joignable |
+| Colonne vide | Le nœud n’a pas ce rôle | Normal si c’est voulu |
+
+Exemple réel : le 16 octobre, la colonne `Storage` affichait `blocked`. Le charm MicroCeph était resté bloqué après un démarrage lent, alors que Ceph fonctionnait. L’enquête est dans le guide `4-juju-cli/` (démo 4), la réparation dans le guide `5-openstack-cli/` (démo 6).
+
+### Étape 3 : la configuration appliquée
+
+**À quoi ça sert :** une fois les machines connues, retrouver les réglages avec lesquels le cloud a été installé (réseau de gestion, adresses des API) sans fouiller les fichiers. Ces adresses servent ensuite partout : fichier `hosts` de Windows, accès des équipes (démo 2).
 
 ```bash
 sunbeam manifest list
@@ -328,6 +283,65 @@ Ce sont exactement les adresses que le script `Configurer-Lab-Sunbeam.ps1` inscr
 
 **Si tu vois autre chose :** une adresse différente ici et dans le fichier `hosts` de Windows explique qu’Horizon ne réponde pas depuis Windows.
 
+### Étape 4 : les fonctionnalités activées
+
+**À quoi ça sert :** savoir quels services optionnels sont installés en plus du socle (Keystone, Nova, Neutron, Glance, Cinder, Horizon, Placement).
+
+```bash
+sunbeam list-features
+```
+
+**La commande, mot par mot :** `list-features` = lister les fonctionnalités et leur état. `-f yaml` donne une liste `nom: true/false`.
+
+**Ce que tu vois :**
+
+```text
+┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
+┃ Feature                ┃ Enabled ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
+│ vault                  │         │
+│ baremetal              │         │
+│ caas                   │         │
+│ dns                    │         │
+│ images-sync            │         │
+│ instance-recovery      │         │
+│ ldap                   │         │
+│ loadbalancer           │         │
+│ maintenance            │         │
+│ observability.embedded │         │
+│ observability.external │         │
+│ resource-optimization  │         │
+│ orchestration          │         │
+│ pro                    │         │
+│ shared-filesystem      │         │
+│ telemetry              │         │
+│ tls.ca                 │         │
+│ tls.self-signed        │         │
+│ tls.vault              │         │
+│ validation             │         │
+└────────────────────────┴─────────┘
+```
+
+**Comment le lire :**
+
+- la colonne `Enabled` contient un `X` quand la fonctionnalité est activée ; **ici, aucune ne l’est** : le lab n’a que le socle ;
+- un nom avec un point est une **variante** : `tls.ca`, `tls.self-signed` et `tls.vault` sont trois façons d’activer TLS, dont une seule à la fois.
+
+| Fonctionnalité | Service ajouté | À quoi il sert |
+|---|---|---|
+| `orchestration` | Heat | Créer une infrastructure entière à partir d’un modèle (démo 5) |
+| `loadbalancer` | Octavia | Répartiteurs de charge |
+| `vault` | Vault | Coffre-fort de secrets ; sert notamment à `tls.vault` |
+| `tls.*` | — | Chiffrer les API (HTTPS) |
+| `ldap` | Keystone | Brancher un annuaire LDAP ou Active Directory |
+| `dns` | Designate | Noms DNS pour les VM |
+| `telemetry`, `observability.*` | Ceilometer, Gnocchi / Prometheus, Grafana | Métrologie, supervision |
+| `instance-recovery` | Masakari | Relancer les VM d’un hôte en panne |
+| `caas` | Magnum | Clusters Kubernetes à la demande |
+| `validation` | Tempest | Tests de conformité du cloud |
+
+**Si tu vois autre chose :** un `X` sur une ligne = ce service est installé, ses API sont dans le catalogue (`openstack catalog list`).
+
 ### Étape 5 : les plans Terraform
 
 **À quoi ça sert :** voir comment Sunbeam découpe le cloud en couches, et vérifier qu’aucune opération n’est en cours ou bloquée.
@@ -374,10 +388,10 @@ La colonne `Locked` vide signifie qu’**aucune opération n’est en cours**.
 
 | Question | Réponse sur le lab | Commande |
 |---|---|---|
-| Combien de machines, quels rôles ? | 1 nœud : contrôle, calcul, stockage | `cluster list` |
 | Quel cloud est piloté ? | `star-heron`, installé à la main | `deployment list` |
+| Combien de machines, quels rôles ? | 1 nœud : contrôle, calcul, stockage, tous `active` | `cluster list` |
+| Quels réglages ? | Gestion `192.168.56.0/24`, API `.201`/`.202`/`.203`, base sans haute disponibilité | `manifest show latest` |
 | Quels services en plus du socle ? | Aucun | `list-features` |
-| Quelles adresses ? | Gestion `192.168.56.0/24`, API `.201`/`.202`/`.203` | `manifest show latest` |
 | Une opération est-elle bloquée ? | Non, aucun verrou | `plans list` |
 
 ---
@@ -386,18 +400,20 @@ La colonne `Locked` vide signifie qu’**aucune opération n’est en cours**.
 
 **Objectif :** remettre à une équipe de quoi utiliser le cloud en ligne de commande, et l’adresse de l’interface web.
 
+Sur le lab, deux fichiers d’accès existent déjà, créés à l’installation : `~/admin-openrc` (administrateur) et `~/demo-openrc` (utilisateur `demo`). Les autres guides et démos les utilisent. Cette démo montre comment **les régénérer** avec `sunbeam`, par exemple après un changement de mot de passe ou pour une nouvelle équipe. On écrit dans de **nouveaux** fichiers pour ne pas écraser ceux du lab.
+
 ### Étape 1 : les variables de l’administrateur
 
 **À quoi ça sert :** obtenir le « fichier openrc », c’est-à-dire les variables qui permettent à la commande `openstack` de se connecter en tant qu’administrateur.
 
 ```bash
 sunbeam openrc > ~/admin-openrc.nouveau
-cat ~/admin-openrc.nouveau
+grep -v OS_PASSWORD ~/admin-openrc.nouveau
 ```
 
-**La commande, mot par mot :** `openrc` affiche les variables à l’écran ; `> ~/admin-openrc.nouveau` les enregistre dans un fichier.
+**La commande, mot par mot :** `openrc` affiche les variables à l’écran ; `> ~/admin-openrc.nouveau` les enregistre dans un fichier. `grep -v OS_PASSWORD` affiche le fichier **sans** la ligne du mot de passe : à préférer à `cat` devant un public.
 
-**Ce que tu vois** (mot de passe masqué ici) :
+**Ce que tu vois** (la ligne `OS_PASSWORD` existe dans le fichier, masquée ici) :
 
 ```text
 # openrc for access to OpenStack
@@ -477,7 +493,7 @@ OS_CLIENT_CONFIG_FILE=~/clouds-equipe.yaml openstack --os-cloud sunbeam-admin hy
 | Symptôme | Cause | Que faire |
 |---|---|---|
 | `Cloud sunbeam was not found` | Le fichier n’a pas été écrit (oubli de `-u`) ou le chemin est faux | Relancer avec `-u`, vérifier `ls -l ~/clouds-equipe.yaml` |
-| Le profil semble ignoré | Des variables `OS_*` sont déjà chargées (`source ~/admin-openrc`) : elles passent avant `--os-cloud` | Ouvrir une session neuve |
+| Le profil semble ignoré, ou le mauvais compte répond | Des variables `OS_*` sont déjà chargées (`source ~/admin-openrc`) et se mélangent au profil | Tester dans une session neuve, sans `source` préalable |
 | Message « Generated … » mais fichier introuvable | Chemin dans `/tmp` : le snap a son propre `/tmp`, invisible pour toi | Toujours écrire dans `~/` |
 
 ⚠ Ces fichiers contiennent des **mots de passe**. Sur le lab, ils sont créés avec les droits `rw-rw----` : les restreindre (`chmod 600 FICHIER`) avant de les transmettre.
@@ -508,7 +524,7 @@ rm -f ~/admin-openrc.nouveau ~/clouds-equipe.yaml
 
 ## 5. Démo 3 : une VM de test en une commande (10 min) ✅
 
-**Objectif :** vérifier en une seule commande que le cloud sait créer une VM joignable : calcul, image, réseau, IP flottante.
+**Objectif :** la démo 1 a montré que les rôles sont `active`, la démo 2 a fourni les accès. Reste à **prouver** que le cloud rend le service attendu : en une seule commande, créer une VM joignable depuis le PC, ce qui fait travailler ensemble le calcul, l’image, le réseau et l’IP flottante.
 
 ```bash
 sunbeam launch --name lab-launch
@@ -531,7 +547,7 @@ Access the instance by running the following command:
 `ssh -i /home/vagrant/snap/openstack/1101/sunbeam ubuntu@192.168.57.199`
 ```
 
-**Comment le lire :** la dernière ligne est **la commande à taper** pour se connecter : `-i …/sunbeam` = la clé privée créée à l’étape 2 ; `ubuntu` = le compte des images Ubuntu ; `192.168.57.199` = l’IP flottante, joignable depuis le PC.
+**Comment le lire :** la dernière ligne est **la commande à taper** pour se connecter : `-i …/sunbeam` = la clé privée créée au point 2 ci-dessus ; `ubuntu` = le compte des images Ubuntu ; `192.168.57.199` = l’IP flottante, joignable depuis le PC.
 
 🔎 **Vérifier depuis Windows** (PowerShell) :
 
@@ -573,7 +589,9 @@ rm -f ~/snap/openstack/*/sunbeam
 
 ## 6. Démo 4 : documenter la configuration (5 min) ✅
 
-**Objectif :** produire un fichier qui décrit **toute** la configuration du cloud, pour la documenter, la comparer avant et après une intervention, ou reconstruire un cloud identique.
+**Objectif :** avant toute intervention (activer un service, mettre à jour), **photographier** la configuration complète du cloud. Le fichier sert à documenter, à comparer avant et après, ou à reconstruire un cloud identique. C’est le préalable logique de la démo 5.
+
+**Différence avec la démo 1 :** `sunbeam manifest show latest` montre le manifeste **appliqué** au bootstrap, réduit aux réglages choisis (une vingtaine de lignes). `sunbeam manifest generate` écrit la configuration **complète**, valeurs par défaut comprises, et un modèle pour chaque fonctionnalité.
 
 ```bash
 sunbeam manifest generate -f ~/manifest-lab.yaml
@@ -623,7 +641,7 @@ features:
 
 - **`core`** : le socle (réseaux, adresses, base de données, versions des charms) ;
 - **`features`** : une section par fonctionnalité ; ici, ce sont des **modèles commentés** (lignes en `#`) : on les décommente pour préparer un manifeste à appliquer avec `-m` ;
-- **activer une fonctionnalité ne modifie pas ce fichier** (vérifié avec Heat en démo 5) : l’état « activé ou non » est gardé par clusterd et se lit avec `sunbeam list-features`.
+- **activer une fonctionnalité ne change pas ce fichier** : constaté sur le lab en activant Heat (démo 5), la section `orchestration` reste un modèle commenté. L’état « activé ou non » est gardé par clusterd et se lit avec `sunbeam list-features`. Pour tracer une activation, il faut donc noter la sortie de `list-features` avant et après, en plus du manifeste.
 
 **Si tu vois autre chose :** `Generated manifest is at /tmp/…` mais le fichier n’existe pas : le snap écrit dans **son** `/tmp`, invisible pour toi. Écris toujours dans `~/`.
 
@@ -640,6 +658,8 @@ rm -f ~/manifest-lab.yaml
 **Objectif :** montrer le cycle complet d’une fonctionnalité optionnelle : ce que l’activation installe, à quoi sert le service, et ce que la désactivation laisse derrière elle.
 
 Durées mesurées : **activation 9 min 50 s**, désactivation 4 min 08 s. Lance l’activation au début d’une pause ou pendant une explication.
+
+**Avant de commencer :** la démo 1 doit être entièrement `active` (on n’ajoute pas un service à un cloud malade), et la démo 4 fournit la photographie « avant ».
 
 ### Étape 1 : vérifier l’état de départ
 
@@ -868,7 +888,24 @@ openstack catalog list -f value -c Name
 
 ### 8.2 Faire évoluer le cloud ⚠ non exécutées
 
-Ces commandes modifient l’architecture : elles n’ont pas été lancées sur le lab (nœud unique).
+Ces commandes modifient l’architecture : elles n’ont pas été lancées sur le lab (nœud unique). Elles sont présentées dans l’ordre de la vie d’un cloud : installation, agrandissement, mise à jour, dépannage.
+
+**Installer le premier nœud** (déjà fait sur le lab, le 9 octobre) :
+
+```bash
+sunbeam cluster bootstrap --role control,compute,storage --topology single
+```
+
+Crée le cloud sur la machine courante. `--role` choisit ses rôles (`control`, `compute`, `storage`, `network`) ; `--topology` (`auto`, `single`, `multi`, `large`) règle la répartition des services de contrôle ; `-m FICHIER` applique un manifeste préparé à l’avance (démo 4).
+
+**Proxy d’entreprise** (à régler **avant** d’ajouter des nœuds, si le réseau l’exige) :
+
+```bash
+sunbeam proxy set --http-proxy http://proxy.entreprise:3128 --https-proxy http://proxy.entreprise:3128 \
+  --no-proxy "localhost,127.0.0.1,192.168.56.0/24,.lab.test"
+```
+
+`--no-proxy` liste ce qui ne doit **pas** passer par le proxy : le réseau de gestion et les noms internes. S’il les oublie, les services ne se parlent plus entre eux.
 
 **Ajouter un nœud :**
 
@@ -909,16 +946,7 @@ sunbeam cluster refresh
 sunbeam cluster refresh mysql
 ```
 
-La première aligne tous les charms sur la version du snap ; la seconde ne met à jour qu’un composant (`k8s`, `mysql`, `vault`). Procédure prudente : `sunbeam manifest generate -f ~/avant.yaml`, instantané des VM, `refresh`, puis les contrôles de l’étape 10 du guide apprenant.
-
-**Proxy d’entreprise :**
-
-```bash
-sunbeam proxy set --http-proxy http://proxy.entreprise:3128 --https-proxy http://proxy.entreprise:3128 \
-  --no-proxy "localhost,127.0.0.1,192.168.56.0/24,.lab.test"
-```
-
-`--no-proxy` liste ce qui ne doit **pas** passer par le proxy : le réseau de gestion et les noms internes. S’il les oublie, les services ne se parlent plus entre eux.
+La première aligne tous les charms sur la version du snap ; la seconde ne met à jour qu’un composant (`k8s`, `mysql`, `vault`). Procédure prudente : démo 1 (tout est `active` ?), démo 4 (`manifest generate -f ~/avant.yaml`), instantané des VM, `refresh`, puis de nouveau la démo 1 et les contrôles de l’étape 10 du guide apprenant.
 
 **Débloquer une opération interrompue :**
 
@@ -940,7 +968,7 @@ sunbeam plans unlock openstack-plan
 | Nom du déploiement | `Deployment local not found` | `show` attend le **nom** (`star-heron`), pas le type (`local`) | `sunbeam deployment list` pour le nom |
 | Secrets à l’écran | Certificats, clé privée, mots de passe | `deployment show` et `manifest generate` les exposent | Ne pas projeter, ne pas joindre à un ticket |
 | Restes après `disable` | Service fantôme au catalogue, compte de service actif | La désactivation ne nettoie pas Keystone | Étape 6 de la démo 5 |
-| `Storage: blocked` | Colonne `Storage` en `blocked`, Ceph pourtant sain | Charm MicroCeph figé après un démarrage lent | Guide `5-openstack-cli/`, démo 6 |
+| `Storage: blocked` | Colonne `Storage` en `blocked`, Ceph pourtant sain | Charm MicroCeph figé après un démarrage lent | Enquête : guide `4-juju-cli/`, démo 4 ; réparation : guide `5-openstack-cli/`, démo 6 |
 
 ---
 
@@ -950,10 +978,10 @@ sunbeam plans unlock openstack-plan
 |---|---|---|
 | `sunbeam -h` et l’aide de chaque groupe | ✅ | |
 | `utils juju-login` | ✅ | Corrige « Failed to login to Juju Controller » |
-| `cluster list` (tableau et YAML) | ✅ | |
 | `deployment list`, `deployment show star-heron` | ✅ | `show` expose des secrets |
-| `list-features`, `list-feature-gates` | ✅ | |
+| `cluster list` (tableau et YAML) | ✅ | Relu le 17 octobre : tous les rôles `active` |
 | `manifest list`, `show latest`, `generate -f ~/…` | ✅ | |
+| `list-features`, `list-feature-gates` | ✅ | |
 | `plans list` | ✅ | |
 | `openrc`, `cloud-config` (`-u`, `-a`, `-c`) | ✅ | Profils vérifiés avec `openstack --os-cloud` |
 | `dashboard-url` | ✅ | |
