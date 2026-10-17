@@ -171,9 +171,49 @@ image-size-cap = 50M
 | `ceph-osd-replication-count` | `1` | Oui : réglée par Sunbeam à l’installation, car le lab n’a qu’un disque Ceph |
 | `image-size-cap` | `50M` | **Suspect** : une limite de 50 Mo sur les images. Une image Ubuntu pèse 600 Mo |
 
+**Où trouver le sens d’une option :** il n’est pas à deviner, chaque charm documente ses options. La description est dans la même sortie JSON :
+
+```bash
+juju config -m openstack glance --format json | python3 -c "import sys,json; print(json.load(sys.stdin)['settings']['image-size-cap']['description'])"
+```
+
+**Ce que tu vois :**
+
+```text
+Maximum size of image a user can upload.
+Example values: 500M, 500MB, 5G, 5TB.
+Valid units: K, KB, M, MB, G, GB, T, TB, P, PB. If no units provided,
+bytes are assumed.
+Defaults to 30G for ceph storage and 1G for local storage.
+.
+and must be set to a value under 8EB (9223372036854775808 bytes).
+```
+
+**Comment le lire :** « taille maximale d’une image qu’un utilisateur peut envoyer », avec les unités acceptées, et la **valeur par défaut** : 30 Go quand les images sont stockées dans Ceph, ce qui est le cas sur ce lab. La même documentation figure sur la page du charm, `https://charmhub.io/glance-k8s` (adresse donnée par `juju info glance-k8s`, ligne `store-url`).
+
 ### Étape 3 : confirmer la cause
 
-Deux confirmations indépendantes. Dans le **journal de Glance** :
+Deux confirmations indépendantes, dans le service lui-même. Il faut d’abord savoir **où** il tourne.
+
+**Où trouver le nom du pod et du conteneur :** chaque unité du modèle `openstack` est un **pod** Kubernetes, nommé comme l’unité, avec `-` à la place de `/` (`glance/0` → `glance-0`). Pour le vérifier, et connaître ses conteneurs :
+
+```bash
+sudo k8s kubectl -n openstack get pods | grep -E "NAME|glance"
+sudo k8s kubectl -n openstack get pod glance-0 -o jsonpath="{.spec.containers[*].name}"; echo
+```
+
+**Ce que tu vois :**
+
+```text
+NAME                             READY   STATUS    RESTARTS       AGE
+glance-0                         2/2     Running   7 (28h ago)    8d
+glance-mysql-router-0            2/2     Running   18 (28h ago)   8d
+charm glance-api
+```
+
+**Comment le lire :** le pod `glance-0` contient **deux** conteneurs (`2/2`) : `charm`, où tourne le charm, et **`glance-api`**, où tourne le service. Les journaux et la configuration du service sont dans `glance-api`.
+
+Dans le **journal de Glance** :
 
 ```bash
 sudo k8s kubectl -n openstack logs glance-0 -c glance-api --since=10m | grep -i "too large" | sed -E 's/.*\] //' | head -2
@@ -188,7 +228,22 @@ The incoming image is too large: The provided image is too large.: glance.common
 
 **Comment le lire :** `ImageSizeLimitExceeded` = « limite de taille d’image dépassée ». Même identifiant d’image que dans l’erreur de l’utilisateur.
 
-Dans le **fichier de configuration** du service :
+Dans le **fichier de configuration** du service. **Où le trouver :** les services OpenStack rangent leur configuration dans `/etc/NOM_DU_SERVICE/` ; on liste le dossier :
+
+```bash
+sudo k8s kubectl -n openstack exec glance-0 -c glance-api -- ls /etc/glance
+```
+
+```text
+api_audit_map.conf
+glance-api-paste.ini
+glance-api.conf
+glance-api.d
+glance-cache.conf
+…
+```
+
+Le fichier de l’API, celle qui reçoit les envois d’images, est `glance-api.conf`. Le nom du réglage dans ce fichier (`image_size_cap`) est celui de l’option Juju, avec `_` au lieu de `-` : on le cherche directement.
 
 ```bash
 sudo k8s kubectl -n openstack exec glance-0 -c glance-api -- grep -n image_size_cap /etc/glance/glance-api.conf
@@ -251,7 +306,7 @@ openstack image create lab-image-test --disk-format raw --container-format bare 
 | Niveau | Résultat | Signification |
 |---|---|---|
 | Juju | ligne vide | L’option n’a plus de valeur : le charm utilise la sienne par défaut |
-| Fichier du service | `32212254720` | 30 Gio : la limite par défaut du charm |
+| Fichier du service | `32212254720` | 30 Gio : la valeur par défaut annoncée par la description de l’option (« 30G for ceph storage ») |
 | **Test utilisateur** | `active`, `104857600` octets | L’image de 100 Mo est acceptée : **le symptôme a disparu** |
 
 ### Nettoyer
@@ -361,7 +416,32 @@ Le charm a vérifié à 10:42:08 et a conclu `active` : il contrôle ses liens e
 
 ### Étape 4 : comprendre, sur la machine
 
-Le modèle `admin/openstack-machines` contient la machine `0`, la VM Lab-Sunbeam. `juju ssh` y exécute des commandes :
+**Où trouver la machine et le nom du service :** la colonne `Machine` de `juju status` dit sur quelle machine tourne l’unité.
+
+```bash
+juju status -m admin/openstack-machines cinder-volume
+```
+
+```text
+Unit                     Workload  Agent  Machine  Public address  Ports  Message
+cinder-volume/0*         active    idle   0        10.0.2.15
+  cinder-volume-ceph/0*  active    idle            10.0.2.15
+```
+
+`cinder-volume/0` est sur la machine **`0`**, la VM Lab-Sunbeam. Sur une machine, les composants de Sunbeam sont installés sous forme de **snaps** (paquets Ubuntu) ; `snap list` donne leur nom exact :
+
+```bash
+juju ssh -m admin/openstack-machines 0 "snap list | grep -E 'Name|cinder'"
+```
+
+```text
+Name                  Version                Rev    Tracking       Publisher    Notes
+cinder-volume         2024.1-4c94ab3f        137    2024.1/stable  canonical**  held
+```
+
+Le snap s’appelle `cinder-volume`. `held` = ses mises à jour automatiques sont suspendues : elles sont pilotées par le charm, pas par le système.
+
+`juju ssh` exécute des commandes sur la machine `0` :
 
 ```bash
 juju ssh -m admin/openstack-machines 0 "snap services cinder-volume"
@@ -511,28 +591,167 @@ Les équipes veulent **voir** l’état du cloud sans apprendre la ligne de comm
 
 Le dashboard n’est **pas exposé** sur le réseau : on y accède par un relais lancé par la commande `juju dashboard`, puis par un tunnel SSH depuis le poste. C’est voulu : seul quelqu’un qui a déjà un accès SSH au lab peut l’ouvrir.
 
-### Étape 1 : vérifier que le charm est disponible
+### Avant d’installer : trouver chaque information soi-même
+
+Pour installer un composant avec Juju, il faut répondre à **cinq questions**. Aucune réponse ne se devine : chacune se lit dans une commande. C’est la démarche à reproduire pour **n’importe quel** charm.
+
+| Question | Où trouver la réponse | Étape |
+|---|---|---|
+| Quel charm installer ? | `juju find`, ou le site [charmhub.io](https://charmhub.io) | 1 |
+| Dans quel modèle, et quelle variante du charm ? | `juju models`, colonne `Type` | 2 |
+| Quelle branche (version) ? | `juju info CHARM`, rubrique `channels`, comparée au système du modèle (`juju status --format yaml`, rubrique `base`) | 3 |
+| À quoi le relier ? | `juju info CHARM`, rubrique `relations`, comparée à celle de l’application cible | 4 |
+| Comment l’utiliser ensuite ? | `juju help COMMANDE` ou `juju COMMANDE --help` | 7 |
+
+### Étape 1 : trouver le charm
+
+🎯 **Objectif : s’informer.** Savoir quels charms existent pour le besoin, et lequel choisir.
 
 ```bash
-juju info juju-dashboard-k8s | sed -n '1,4p;/channels/,/0.15\/stable/p'
+juju find juju-dashboard
 ```
 
-**À quoi ça sert :** un contrôleur Sunbeam tourne sur Kubernetes ; il faut la version **Kubernetes** du charm (`-k8s`), et une branche compatible avec Ubuntu 24.04.
+**La commande, mot par mot :** `find` = chercher dans **Charmhub**, la bibliothèque publique des charms ; `juju-dashboard` = le mot cherché. Il faut que Lab-Sunbeam accède à Internet.
 
 **Ce que tu vois :**
 
 ```text
-name: juju-dashboard-k8s
-publisher: Juju Engineering
-summary: View the real-time status of your Juju environment.
-description: |
-channels: |
-  0.15/stable:       72  2026-03-30  (72)  12MB  amd64  ubuntu@24.04
+Name                Bundle  Version  Publisher         Summary
+juju-dashboard      -       78       Juju Engineering  View the real-time status of your Juju or
+                                                       JAAS environment.
+juju-dashboard-k8s  -       72       Juju Engineering  View the real-time status of your Juju environment.
 ```
 
-**Comment le lire :** le charm est publié par l’équipe Juju ; la branche `0.15/stable` (révision 72) existe pour `ubuntu@24.04`. C’est celle qu’on installe. (La branche `latest/stable`, plus ancienne, ne vise que les Ubuntu 20.04 et 22.04.)
+**Comment le lire :**
 
-### Étape 2 : installer le dashboard dans le modèle du contrôleur
+| Colonne | Signification |
+|---|---|
+| `Name` | Le nom du charm, à donner à `juju deploy` |
+| `Version` | La révision la plus récente publiée |
+| `Publisher` | L’éditeur : `Juju Engineering` est l’équipe de Juju elle-même, une source sûre |
+| `Summary` | La description courte |
+
+Deux charms pour le même logiciel. Le suffixe **`-k8s`** est une convention de Charmhub : il désigne la variante qui s’installe dans un modèle **Kubernetes** ; sans suffixe, la variante s’installe sur une **machine**. L’étape 2 dit laquelle prendre.
+
+Même information, avec la documentation, sur le site : `https://charmhub.io/juju-dashboard-k8s` (l’adresse est donnée par `juju info`, ligne `store-url`).
+
+### Étape 2 : choisir le modèle, donc la variante
+
+🎯 **Objectif : s’informer.** Le dashboard affiche les données **du contrôleur** Juju : on l’installe dans le modèle du contrôleur. Reste à savoir de quel type est ce modèle.
+
+```bash
+juju models
+```
+
+**Ce que tu vois :**
+
+```text
+Model                     Cloud/Region              Type        Status     Machines  Cores  Units  Access  Last connection
+admin/controller          star-heron-k8s/localhost  kubernetes  available         0      -  1      admin   just now
+openstack                 star-heron-k8s/localhost  kubernetes  available         0      -  25     admin   12 minutes ago
+admin/openstack-machines  star-heron/default        manual      available         1      8  7      admin   12 minutes ago
+```
+
+**Comment le lire :** le modèle du contrôleur est `admin/controller`, et sa colonne `Type` vaut **`kubernetes`**. Il faut donc la variante **`juju-dashboard-k8s`**. (Le charm `juju-dashboard` sans suffixe conviendrait à un contrôleur installé sur des machines.)
+
+### Étape 3 : choisir la branche
+
+🎯 **Objectif : s’informer.** Un charm est publié en plusieurs **branches** (*channels*), chacune pour certaines versions d’Ubuntu. Il faut celle qui correspond au système du modèle.
+
+D’abord, le système des applications du modèle du contrôleur :
+
+```bash
+juju status -m admin/controller --format yaml | grep -A2 "base:"
+```
+
+**Ce que tu vois :**
+
+```text
+    base:
+      name: ubuntu
+      channel: "24.04"
+```
+
+**Comment le lire :** le contrôleur tourne sur **Ubuntu 24.04**.
+
+Ensuite, les branches du charm :
+
+```bash
+juju info juju-dashboard-k8s
+```
+
+**Ce que tu vois** (extrait) :
+
+```text
+name: juju-dashboard-k8s
+publisher: Juju Engineering
+store-url: https://charmhub.io/juju-dashboard-k8s
+supports: ubuntu@24.04
+relations:
+  provides:
+    dashboard: http
+  requires:
+    controller: juju-dashboard
+    ingress: ingress
+    nginx-route: nginx-route
+channels: |
+  0.15/stable:       72  2026-03-30  (72)  12MB  amd64  ubuntu@24.04
+  0.15/candidate:    72  2026-03-30  (72)  12MB  amd64  ubuntu@24.04
+  0.15/beta:         72  2026-03-30  (72)  12MB  amd64  ubuntu@24.04
+  0.15/edge:         ^
+  latest/stable:     16  2025-03-28  (16)  6MB  amd64  ubuntu@22.04, ubuntu@20.04
+  0.16/stable:       75  2026-08-28  (75)  10MB  amd64  ubuntu@22.04
+  0.16/candidate:    76  2026-08-28  (76)  12MB  amd64  ubuntu@24.04
+```
+
+**Comment lire la rubrique `channels` :** chaque ligne est `version/niveau : révision, date, taille, architecture, systèmes`.
+
+| Niveau | Signification |
+|---|---|
+| `stable` | Version validée : **celle qu’on prend en production** |
+| `candidate`, `beta`, `edge` | Versions de plus en plus expérimentales |
+| `^` | Même révision que la ligne au-dessus |
+
+**Le choix, ligne par ligne :**
+
+| Branche | Systèmes | Retenue ? |
+|---|---|---|
+| `0.16/stable` | `ubuntu@22.04` seulement | Non : ne correspond pas à 24.04 |
+| `0.16/candidate` | `ubuntu@24.04` | Non : pas `stable` |
+| **`0.15/stable`** | **`ubuntu@24.04`** | **Oui** : la branche `stable` la plus récente pour 24.04 |
+| `latest/stable` | `ubuntu@22.04, ubuntu@20.04` | Non |
+
+D’où `--channel 0.15/stable`, révision 72. Ces branches évoluent : refais cette lecture le jour de l’installation, le résultat peut être différent.
+
+### Étape 4 : savoir à quoi le relier
+
+🎯 **Objectif : s’informer.** Un charm reçoit ce dont il a besoin par ses **relations**. La rubrique `relations` de `juju info` (étape 3) l’indique :
+
+```text
+  requires:
+    controller: juju-dashboard
+```
+
+**Comment le lire :** le dashboard **a besoin** (`requires`) d’un point de connexion nommé `controller`, de type **`juju-dashboard`**. Qui le fournit ? On regarde la même rubrique pour l’application du contrôleur :
+
+```bash
+juju info juju-controller | sed -n '/relations/,/requires/p'
+```
+
+**Ce que tu vois :**
+
+```text
+relations:
+  provides:
+    dashboard: juju-dashboard
+    metrics-endpoint: prometheus_scrape
+    website: http
+  requires:
+```
+
+**Comment le lire :** l’application `controller` **fournit** (`provides`) un point `dashboard` du même type `juju-dashboard`. Les deux types correspondent : c’est la relation à créer, d’où `juju integrate … dashboard controller` à l’étape 5. Les relations `ingress` et `nginx-route` du dashboard sont facultatives (publication web derrière un répartiteur) : on ne s’en sert pas ici.
+
+### Étape 5 : installer le dashboard dans le modèle du contrôleur
 
 ```bash
 juju deploy -m admin/controller juju-dashboard-k8s dashboard --channel 0.15/stable
@@ -546,7 +765,7 @@ juju integrate -m admin/controller dashboard controller
 | `juju deploy` | Installer une application à partir d’un charm |
 | `-m admin/controller` | Dans le modèle **du contrôleur** : le dashboard est un outil d’administration de Juju, pas du cloud |
 | `juju-dashboard-k8s dashboard` | Le charm, et le nom donné à l’application : `dashboard` |
-| `--channel 0.15/stable` | La branche vérifiée à l’étape 1 |
+| `--channel 0.15/stable` | La branche choisie à l’étape 3 |
 | `juju integrate … dashboard controller` | Relier le dashboard au contrôleur : c’est par ce lien qu’il obtient l’adresse du contrôleur |
 
 ℹ C’est la seule commande de ce document qui **ajoute** un composant par Juju. C’est acceptable ici : le modèle `admin/controller` n’est pas géré par Sunbeam, qui ne viendra donc pas l’écraser.
@@ -594,7 +813,7 @@ controller:dashboard  dashboard:controller  juju-dashboard  regular
 
 **Comment le lire :** l’application `dashboard` est `active`, avec une adresse **interne** à Kubernetes (`10.152.183.213`) et `Exposed no` : elle n’est pas joignable depuis le réseau. La ligne `controller:dashboard → dashboard:controller` confirme le lien.
 
-### Étape 3 : créer un compte en lecture seule
+### Étape 6 : créer un compte en lecture seule
 
 **Pourquoi un compte dédié :** se connecter au dashboard avec un compte `superuser` donnerait à l’équipe le droit de tout modifier. On crée un compte qui ne peut que **lire** les deux modèles du cloud.
 
@@ -651,7 +870,7 @@ sunbeam*                     superuser  2026-10-09     just now
 
 **Comment le lire :** au niveau du contrôleur, `lab-dashboard` n’a que le droit `login` (se connecter) ; sur le modèle `openstack`, il a `read`. Il ne peut **rien modifier**.
 
-### Étape 4 : lancer le relais
+### Étape 7 : lancer le relais
 
 ```bash
 juju dashboard -m admin/controller --hide-credential
@@ -668,9 +887,9 @@ Dashboard for controller "sunbeam-controller" is enabled at:
 
 **Comment le lire :** le relais écoute sur **Lab-Sunbeam**, port `43959`. **Note ce numéro** : il change à chaque lancement. Sur cette version, l’option `--port 31666` est **ignorée**. La commande reste au premier plan : **laisse cette session ouverte** tant que le dashboard sert.
 
-### Étape 5 : ouvrir le tunnel depuis Windows
+### Étape 8 : ouvrir le tunnel depuis Windows
 
-Dans un **nouveau** PowerShell, sur Windows, en remplaçant `43959` par le port de l’étape 4 :
+Dans un **nouveau** PowerShell, sur Windows, en remplaçant `43959` par le port de l’étape 7 :
 
 ```powershell
 ssh -N -L 31666:localhost:43959 vagrant@192.168.56.10
@@ -685,7 +904,7 @@ ssh -N -L 31666:localhost:43959 vagrant@192.168.56.10
 
 **Ce que tu vois :** la demande du mot de passe de `vagrant`, puis **rien** : c’est normal, le tunnel est ouvert tant que la fenêtre l’est.
 
-### Étape 6 : se connecter
+### Étape 9 : se connecter
 
 Dans le navigateur de Windows : **http://localhost:31666**
 
@@ -708,16 +927,16 @@ Dans le navigateur de Windows : **http://localhost:31666**
 | Ce que tu vois | Cause | Que faire |
 |---|---|---|
 | `ERROR No selected model` | `juju dashboard` sans `-m` | Ajouter `-m admin/controller` |
-| Le navigateur ne répond pas | Tunnel fermé, mauvais port, ou session `juju dashboard` fermée | Relancer l’étape 4, noter le port, relancer l’étape 5 |
+| Le navigateur ne répond pas | Tunnel fermé, mauvais port, ou session `juju dashboard` fermée | Relancer l’étape 7, noter le port, relancer l’étape 8 |
 | `bind … Address already in use` dans PowerShell | Le port 31666 est déjà pris sur Windows (ancien tunnel) | Fermer l’ancienne fenêtre, ou choisir un autre port local, par exemple `-L 31667:localhost:PORT` |
 | Échec de connexion | Mauvais mot de passe | `juju change-user-password lab-dashboard` |
 | `dashboard/0` reste `waiting` | Le lab n’accède pas à Internet (Charmhub) | Vérifier la sortie Internet de Lab-Sunbeam |
 
-### Étape 7 : retirer le dashboard
+### Étape 10 : retirer le dashboard
 
 Le dashboard n’est pas nécessaire au fonctionnement du cloud. Pour revenir à l’état d’origine :
 
-1. fermer le tunnel (fenêtre PowerShell : `Ctrl+C`) et le relais (session de l’étape 4 : `Ctrl+C`) ;
+1. fermer le tunnel (fenêtre PowerShell : `Ctrl+C`) et le relais (session de l’étape 7 : `Ctrl+C`) ;
 2. puis :
 
 ```bash
