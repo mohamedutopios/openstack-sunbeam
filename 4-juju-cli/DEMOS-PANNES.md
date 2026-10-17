@@ -250,8 +250,20 @@ Les journaux et la configuration **du service** sont donc dans le conteneur `gla
 Dans le **journal de Glance** :
 
 ```bash
-sudo k8s kubectl -n openstack logs glance-0 -c glance-api --since=10m | grep -i "too large" | sed -E 's/.*\] //' | head -2
+sudo k8s kubectl -n openstack logs glance-0 -c glance-api --since=1h | grep -i "too large" | sed -E 's/.*\] //' | head -2
 ```
+
+**La commande, mot par mot :**
+
+| Morceau | Rôle |
+|---|---|
+| `logs glance-0 -c glance-api` | Le journal du conteneur `glance-api` du pod `glance-0` : celui du **service** |
+| `--since=1h` | Seulement la dernière heure. **Adapter** à l’heure de l’envoi refusé : avec `--since=10m`, un refus vieux de 20 minutes n’apparaît pas, et la commande ne renvoie **rien** |
+| `grep -i "too large"` | Garder les lignes qui contiennent « too large », quelle que soit la casse |
+| `sed -E 's/.*\] //'` | Retirer le début technique de chaque ligne (date, numéro de processus…) |
+| `head -2` | Les deux premières suffisent |
+
+Si rien ne s’affiche : relancer l’envoi de l’étape 1, puis cette commande aussitôt.
 
 **Ce que tu vois :**
 
