@@ -500,7 +500,82 @@ juju show-status-log -m admin/openstack-machines cinder-volume/0 | tail -1
 17 Oct 2026 10:42:08Z  workload   active
 ```
 
-Le charm a vérifié à 10:42:08 et a conclu `active` : il contrôle ses liens et sa configuration, **pas** que le service tourne. C’est exactement le cas où il faut descendre **sur la machine**.
+### Pourquoi Juju et Sunbeam ne voient pas la panne
+
+Ce n’est pas un bug, c’est la façon dont l’état est **calculé**. Pour le prouver, on lit le code qui le calcule : il est sur le lab.
+
+**1. Ce que Juju affiche, c’est ce que le charm lui déclare.** Juju ne teste pas lui-même les services : il affiche l’état (`workload`) que le **charm** de chaque unité lui transmet à la fin de chacune de ses étapes (*hooks*). La question est donc : quand et comment le charm `cinder-volume` décide-t-il qu’il est `active` ?
+
+Le code du charm est installé avec l’unité, dans `/var/lib/juju/agents/unit-NOM-NUMÉRO/charm/` :
+
+```bash
+sudo grep -n -A6 "def check_serving_backends" /var/lib/juju/agents/unit-cinder-volume-0/charm/src/charm.py
+```
+
+```text
+285:    def check_serving_backends(self):
+286-        """Check if backends are ready to serve."""
+287-        if not self.cinder_volume.backends():
+288-            msg = "Waiting for backends"
+289-            self._backend_status.set(ops.WaitingStatus(msg))
+290-            raise sunbeam_guard.WaitingExceptionError(msg)
+291-        self._backend_status.set(ops.ActiveStatus())
+```
+
+**Comment le lire :** le charm se déclare `active` (`ActiveStatus`) dès qu’un **stockage est déclaré** par sa relation avec `cinder-volume-ceph` (`backends()`). Il ne vérifie **pas** que le service tourne.
+
+**2. Ce calcul n’a lieu que lors d’une reconfiguration.** La fonction ci-dessus est appelée par la configuration du charm, déclenchée par des événements : changement de configuration, de relation, de secret, démarrage. Le contrôle périodique de Juju, l’étape `update-status`, lancée toutes les 5 minutes :
+
+```bash
+juju model-config -m admin/openstack-machines update-status-hook-interval
+```
+
+```text
+5m
+```
+
+n’est **pas traité** par ce charm : ni son code, ni la bibliothèque commune des charms Sunbeam ne réagissent à cet événement.
+
+```bash
+sudo grep -c "update_status\|update-status" /var/lib/juju/agents/unit-cinder-volume-0/charm/src/charm.py /var/lib/juju/agents/unit-cinder-volume-0/charm/lib/ops_sunbeam/charm.py
+```
+
+```text
+/var/lib/juju/agents/unit-cinder-volume-0/charm/src/charm.py:0
+/var/lib/juju/agents/unit-cinder-volume-0/charm/lib/ops_sunbeam/charm.py:0
+```
+
+**Comment le lire :** zéro occurrence dans les deux fichiers. À chaque `update-status`, le charm ne refait aucune vérification : il **republie le dernier état mémorisé**, `active`, calculé lors de sa dernière configuration. C’est la ligne `10:42:08 workload active` vue plus haut : un contrôle périodique a bien eu lieu… et a recopié l’ancien résultat.
+
+**3. Sunbeam ne regarde même pas `cinder-volume`.** La colonne `Storage` de `sunbeam cluster list` est calculée par le code de la commande `sunbeam`, installé dans le snap `openstack` :
+
+```bash
+grep -n -A8 "def applications_to_columns" /snap/openstack/current/lib/python3.12/site-packages/sunbeam/steps/cluster_status.py
+```
+
+```text
+126:    def applications_to_columns(self) -> dict:
+127-        """Mapping of applications to columns."""
+128-        return {
+129-            clusterd.APPLICATION: "clusterd",
+130-            k8s.APPLICATION: "control",
+131-            hypervisor.APPLICATION: "compute",
+132-            microceph.APPLICATION: "storage",
+133-            microovn.APPLICATION: "network",
+134-        }
+```
+
+**Comment le lire :** chaque colonne recopie l’état Juju **d’une seule application** : `Storage` = l’état de **`microceph`**, `Control` = celui de `k8s`, `Compute` = celui de l’hyperviseur. `cinder-volume` n’est dans **aucune** colonne. Ceph allant bien, `Storage` reste `active`, quel que soit l’état du service des volumes.
+
+**En résumé :**
+
+| Outil | Ce qu’il affiche réellement | Pourquoi il ne voit pas l’arrêt |
+|---|---|---|
+| `juju status` | L’état déclaré par le charm lors de sa **dernière configuration** | Le charm ne vérifie que la présence d’un stockage, et ne refait rien lors du contrôle périodique |
+| `sunbeam cluster list` | L’état Juju de `microceph` (colonne `Storage`) | `cinder-volume` ne fait partie d’aucune colonne |
+| `openstack volume service list` | Le **signal de vie** que le service envoie lui-même toutes les quelques secondes | Il voit l’arrêt : c’est la seule des trois vues qui interroge le service |
+
+**Ce qu’il faut retenir :** avant de faire confiance à un `active`, savoir **qui** le calcule et **sur quoi**. Pour un service, la preuve qu’il fonctionne vient du service lui-même (son signal de vie, un appel réel), pas de l’outil qui l’a installé. C’est pourquoi on descend maintenant **sur la machine**.
 
 ### Étape 4 : comprendre, sur la machine
 
