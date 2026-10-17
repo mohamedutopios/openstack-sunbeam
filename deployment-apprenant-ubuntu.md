@@ -308,6 +308,48 @@ sudo snap restart microceph.osd
 
 Sans Ceph, Glance ne fournit pas les images et Nova échoue (`HTTP 502`).
 
+**Le service des volumes (Cinder)**
+
+Ceph peut être sain alors que Cinder n’a plus accès au stockage. C’est arrivé sur le lab après une réimportation : au démarrage, les charms `microceph` et `cinder-volume` ont dépassé un délai et sont restés figés, alors que `ceph -s` était correct.
+
+```bash
+source ~/admin-openrc
+openstack volume service list -c Binary -c Host -c State -c "Updated At"
+juju status -m admin/openstack-machines --format short | grep -E "microceph/|cinder-volume/"
+```
+
+Attendu : `cinder-volume … up`, et `microceph/0` comme `cinder-volume/0` en `workload:active`.
+
+| Symptôme | Signification |
+|---|---|
+| `cinder-volume … down`, `Updated At` figé à l’heure du démarrage | Cinder n’a plus de stockage : toute création de volume passe en `error` |
+| `microceph/0 … workload:blocked` (« Error in charm: timed out ») | Le charm MicroCeph a échoué au démarrage et ne transmet plus les informations de Ceph |
+| `cinder-volume/0 … workload:waiting` (« Not all relations are ready ») | Conséquence du point précédent : le service `cinder-volume` reste désactivé |
+
+Correction : relancer la configuration des deux charms, **MicroCeph d’abord**, en vérifiant après chacun.
+
+```bash
+juju exec -m admin/openstack-machines --unit microceph/0 -- "JUJU_DISPATCH_PATH=hooks/config-changed ./dispatch"
+juju status -m admin/openstack-machines --format short | grep -E "microceph/|cinder-volume/"
+juju exec -m admin/openstack-machines --unit cinder-volume/0 -- "JUJU_DISPATCH_PATH=hooks/config-changed ./dispatch"
+juju status -m admin/openstack-machines --format short | grep -E "microceph/|cinder-volume/"
+```
+
+Les deux unités doivent passer en `workload:active` (MicroCeph peut afficher encore une fois « timed out » avant d’aboutir). Redémarrer l’agent Juju de la machine ne suffit pas : l’état figé est conservé.
+
+Vérifier avec un vrai volume :
+
+```bash
+openstack volume service list -c Binary -c State
+source ~/demo-openrc
+openstack volume create lab-vol-test --size 1 -c status
+openstack volume show lab-vol-test -c status
+openstack volume delete lab-vol-test
+source ~/admin-openrc
+```
+
+Le volume doit passer `available` en moins d’une minute.
+
 ### 10.3 KVM imbriqué sans EPT
 
 ```bash
@@ -413,6 +455,7 @@ Après la première validation complète, crée un snapshot des **deux VM étein
 | Horizon 503 ou ne répond pas juste après le démarrage | Services encore en cours de démarrage | Attendre 10 à 15 min |
 | `openstack ...` : `HTTP 500` sur l’authentification | Unité `keystone-mysql-router` en erreur | 10.1 |
 | Lancement d’instance : `ERROR`, `HTTP 502` Glance dans les logs Nova | OSD Ceph arrêté | 10.2 |
+| Volume en `error`, `cinder-volume` `down` dans `openstack volume service list` | Charms `microceph` et `cinder-volume` figés au démarrage | 10.2 (service des volumes) |
 | Instance `ACTIVE` sans ping ni SSH, `Kernel panic` dans sa console | EPT actif | 10.3 |
 | Instance : ping Internet OK, `apt`/HTTPS bloqués | MTU de `provider0` à 1500 | 10.4 |
 | `juju status -m openstack-machines` : `not found` | Nom du modèle | `admin/openstack-machines` |
