@@ -381,6 +381,23 @@ sudo snap stop cinder-volume
 
 **Ce que fait la commande :** elle arrête, sur la machine, le service qui crée les volumes (disques) des VM. C’est réaliste : un administrateur arrête un service pour une maintenance et oublie de le relancer, ou un script le coupe.
 
+**Puis attendre que Cinder constate l’arrêt.** Cinder ne déclare un service `down` qu’après **environ une minute sans signal de vie**. Avant, il le croit encore vivant. On attend donc qu’il l’affiche `down` :
+
+```bash
+source ~/admin-openrc
+until openstack volume service list -c Binary -c State -f value | grep -q "cinder-volume down"; do sleep 10; done
+openstack volume service list -c Binary -c State -f value
+```
+
+**La commande, mot par mot :** `until … ; do sleep 10; done` = répéter toutes les 10 secondes **jusqu’à ce que** la ligne `cinder-volume down` apparaisse. La commande rend la main au bout d’une à deux minutes.
+
+**Ce que tu vois :**
+
+```text
+cinder-scheduler up
+cinder-volume down
+```
+
 ### Étape 1 : constater le symptôme
 
 ```bash
@@ -399,19 +416,30 @@ error
 
 **Comment le lire :** la création est acceptée (`creating`), puis échoue (`error`). Le volume ne dit pas pourquoi.
 
-⚠ **Attendre au moins 2 minutes entre l’arrêt du service et la création du volume.** Cinder ne déclare un service `down` qu’après environ une minute sans signal de vie. Si le volume est demandé avant, le résultat est différent, et il a été observé sur le lab : volume créé 55 secondes après le dernier signal de `cinder-volume`.
+Un premier indice, avec le compte administrateur, qui seul voit l’hôte d’un volume :
 
 ```bash
 source ~/admin-openrc
 openstack volume show lab-vol-panne -c status -c os-vol-host-attr:host -f value
 ```
 
+**Ce que tu vois :**
+
 ```text
-creating
-sunbeam@cinder-volume-ceph#cinder-volume-ceph
+None
+error
 ```
 
-**Comment le lire :** le volume reste **bloqué en `creating`**, sans erreur. Le planificateur croyait encore le service vivant : il lui a confié le volume (`os-vol-host-attr:host` est rempli, avec l’hôte `sunbeam`). La demande attend dans la file de messages un service qui ne répond plus. C’est une deuxième forme de la même panne, aussi fréquente en production : **un volume qui reste en `creating` alors que son hôte est `down`** se diagnostique exactement comme la suite de cette partie.
+**Comment le lire :** `-f value` affiche les colonnes dans l’ordre alphabétique : d’abord `os-vol-host-attr:host`, l’hôte de stockage chargé du volume, puis `status`. Hôte **`None`** : le planificateur ne l’a confié à **aucun** stockage. Le problème est en amont du stockage, au moment du choix.
+
+**Si le volume reste en `creating`** : il a été demandé **avant** que Cinder déclare le service `down` (attente précédente sautée ou trop courte). Observé sur le lab en créant le volume aussitôt après `snap stop`, 55 secondes après le dernier signal du service. La même commande donne alors :
+
+```text
+sunbeam@cinder-volume-ceph#cinder-volume-ceph
+creating
+```
+
+**Comment le lire :** le planificateur croyait encore le service vivant : il lui a confié le volume (hôte rempli, `sunbeam`). La demande attend dans la file de messages un service qui ne répond plus. C’est une **deuxième forme** de la même panne, fréquente en production : un volume qui reste en `creating` alors que son hôte est `down`. Elle se diagnostique avec les mêmes étapes 3 à 6.
 
 ### Étape 2 : localiser, côté OpenStack
 
@@ -519,7 +547,7 @@ cinder-volume.cinder-volume  enabled  inactive  -
 L’historique des opérations sur les snaps :
 
 ```bash
-juju ssh -m admin/openstack-machines 0 "snap changes | tail -2"
+juju ssh -m admin/openstack-machines 0 "snap changes | tail -3"
 ```
 
 ```text
@@ -527,9 +555,13 @@ juju ssh -m admin/openstack-machines 0 "snap changes | tail -2"
 266  Done    today at 10:37 UTC      today at 10:37 UTC      Running service command
 ```
 
+**Comment le lire :** une ligne par opération sur les snaps, la plus récente en bas ; la sortie de `snap changes` se termine par une ligne vide, d’où `tail -3` pour voir les deux dernières. La première colonne est le **numéro** de l’opération ; le résumé, « Running service command », ne dit pas laquelle. On demande le détail de la plus récente, celle qui correspond à l’heure de la panne :
+
 ```bash
 juju ssh -m admin/openstack-machines 0 "snap change 266"
 ```
+
+🔁 **Remplace `266` par le numéro de ta dernière ligne** : il change à chaque opération (en rejouant la démo plus tard dans la journée, c’était `279`).
 
 ```text
 Status  Spawn               Ready               Summary
