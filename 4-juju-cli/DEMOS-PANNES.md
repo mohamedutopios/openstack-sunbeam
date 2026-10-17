@@ -1012,11 +1012,13 @@ watch -n 10 "juju status -m admin/controller --format short"
 | +50 s | `agent:executing, workload:active` | Le charm configure le dashboard |
 | +1 min 10 s | `agent:idle, workload:active` | Prêt |
 
-Puis vérifier le lien :
+Puis vérifier le lien créé par `juju integrate` :
 
 ```bash
 juju status -m admin/controller --relations
 ```
+
+**La commande, mot par mot :** `juju status -m admin/controller` affiche les applications et les unités du modèle ; **`--relations`** ajoute une section **`Integration`** qui liste les **relations** entre applications (les liens créés par `juju integrate`). Sans cette option, `juju status` ne les affiche pas : sur le lab, la même commande sans `--relations` s’arrête après la section `Unit`. C’est donc l’option à ajouter pour vérifier qu’une relation existe.
 
 **Ce que tu vois :**
 
@@ -1033,7 +1035,21 @@ Integration provider  Requirer              Interface       Type     Message
 controller:dashboard  dashboard:controller  juju-dashboard  regular
 ```
 
-**Comment le lire :** l’application `dashboard` est `active`, avec une adresse **interne** à Kubernetes (`10.152.183.213`) et `Exposed no` : elle n’est pas joignable depuis le réseau. La ligne `controller:dashboard → dashboard:controller` confirme le lien.
+**Comment le lire**, section par section :
+
+| Section | Colonne | Valeur | Signification |
+|---|---|---|---|
+| `App` | `Status` | `active` | L’application `dashboard` fonctionne |
+| | `Address` | `10.152.183.213` | Son adresse **interne** à Kubernetes : joignable seulement depuis le cluster |
+| | `Exposed` | `no` | Juju ne l’a pas ouverte sur le réseau (`juju expose`) ; le contrôleur, lui, l’est (`yes`) car les clients Juju doivent le joindre |
+| `Unit` | `dashboard/0*` | `active idle` | Son unité unique, prête et au repos |
+| `Integration` | `Integration provider` | `controller:dashboard` | **Qui fournit** : l’application `controller`, par son point de connexion (*endpoint*) `dashboard` |
+| | `Requirer` | `dashboard:controller` | **Qui consomme** : l’application `dashboard`, par son point `controller` |
+| | `Interface` | `juju-dashboard` | Le « protocole » de la relation : les deux points doivent avoir le même. C’est celui qu’on a lu dans `juju info` à l’étape 4 |
+| | `Type` | `regular` | Une relation ordinaire entre deux applications (`peer` désignerait une relation d’une application avec elle-même, entre ses unités ; `subordinate`, celle d’un charm greffé sur un autre) |
+| | `Message` | *(vide)* | Pas de problème signalé sur la relation |
+
+La ligne `controller:dashboard → dashboard:controller` est exactement ce que l’étape 4 avait prévu (`provides: dashboard` d’un côté, `requires: controller` de l’autre, même interface) : **la relation est en place**. Si cette ligne manquait, c’est que `juju integrate` n’a pas été lancé ou a échoué : le relancer.
 
 ### Étape 6 : créer un compte en lecture seule
 
