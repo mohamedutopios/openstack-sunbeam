@@ -399,6 +399,20 @@ error
 
 **Comment le lire :** la création est acceptée (`creating`), puis échoue (`error`). Le volume ne dit pas pourquoi.
 
+⚠ **Attendre au moins 2 minutes entre l’arrêt du service et la création du volume.** Cinder ne déclare un service `down` qu’après environ une minute sans signal de vie. Si le volume est demandé avant, le résultat est différent, et il a été observé sur le lab : volume créé 55 secondes après le dernier signal de `cinder-volume`.
+
+```bash
+source ~/admin-openrc
+openstack volume show lab-vol-panne -c status -c os-vol-host-attr:host -f value
+```
+
+```text
+creating
+sunbeam@cinder-volume-ceph#cinder-volume-ceph
+```
+
+**Comment le lire :** le volume reste **bloqué en `creating`**, sans erreur. Le planificateur croyait encore le service vivant : il lui a confié le volume (`os-vol-host-attr:host` est rempli, avec l’hôte `sunbeam`). La demande attend dans la file de messages un service qui ne répond plus. C’est une deuxième forme de la même panne, aussi fréquente en production : **un volume qui reste en `creating` alors que son hôte est `down`** se diagnostique exactement comme la suite de cette partie.
+
 ### Étape 2 : localiser, côté OpenStack
 
 Le message adressé à l’utilisateur :
@@ -597,12 +611,27 @@ available
 
 **Comment le lire :** le service est `up` (environ une minute après le redémarrage), le stockage Ceph est de nouveau proposé (`pool`), et un nouveau volume passe `available` : **le symptôme a disparu.**
 
+**Et le volume de l’étape 1 ?** Tout dépend de son état pendant la panne :
+
+```bash
+openstack volume show lab-vol-panne -c status -f value
+```
+
+| État pendant la panne | État après la correction | Explication |
+|---|---|---|
+| `error` (volume demandé alors que le service était déjà `down`) | Reste `error` | Le planificateur a refusé la demande : elle n’existe plus. Il faut supprimer ce volume et en recréer un |
+| `creating` (volume demandé moins d’une minute après l’arrêt) | **`available`**, sans rien refaire | Observé sur le lab : la demande attendait dans la file de messages ; le service redémarré l’a traitée. Un volume bloqué en `creating` n’est pas perdu, il attend son service |
+
+⚠ Pendant la panne, un volume en `creating` **ne peut pas être supprimé** : `openstack volume delete` répond `Invalid volume: Volume status must be available or error … (HTTP 400)`. C’est une protection : Cinder ne supprime pas un volume qu’un service est peut-être en train de créer. On répare d’abord le service, puis on supprime.
+
 ### Nettoyer
 
 ```bash
 openstack volume delete lab-vol-ok lab-vol-panne
 openstack volume list
 ```
+
+Si tu as créé d’autres volumes de test pendant la panne (`lab-vol-panne2`…), ajoute-les à la commande.
 
 ✅ **Attendu :** une liste vide.
 
