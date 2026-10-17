@@ -928,7 +928,7 @@ Dans le navigateur de Windows : **http://localhost:31666**
 |---|---|---|
 | `ERROR No selected model` | `juju dashboard` sans `-m` | Ajouter `-m admin/controller` |
 | Le navigateur ne répond pas | Tunnel fermé, mauvais port, ou session `juju dashboard` fermée | Relancer l’étape 7, noter le port, relancer l’étape 8 |
-| `bind … Address already in use` dans PowerShell | Le port 31666 est déjà pris sur Windows (ancien tunnel) | Fermer l’ancienne fenêtre, ou choisir un autre port local, par exemple `-L 31667:localhost:PORT` |
+| `bind [127.0.0.1]:31666: Permission denied` puis `Could not request local forwarding.` dans PowerShell | Le port 31666 de Windows est **déjà pris**, le plus souvent par un ancien tunnel resté ouvert (observé sur le lab). Malgré le message, `ssh` reste connecté, sans tunnel | `Ctrl+C`, puis trouver le processus qui tient le port : `Get-NetTCPConnection -LocalPort 31666 -State Listen` (colonne `OwningProcess`), fermer l’ancien tunnel, et relancer. Ou utiliser un autre port local : `-L 31667:localhost:PORT`, puis http://localhost:31667 |
 | Échec de connexion | Mauvais mot de passe | `juju change-user-password lab-dashboard` |
 | `dashboard/0` reste `waiting` | Le lab n’accède pas à Internet (Charmhub) | Vérifier la sortie Internet de Lab-Sunbeam |
 
