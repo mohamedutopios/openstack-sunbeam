@@ -4,6 +4,7 @@ Ce guide montre comment **observer et dépanner** un cloud Sunbeam avec la comma
 
 | Rubrique | Ce qu’elle contient |
 |---|---|
+| 🎯 **Objectif** | **Pourquoi** on lance la commande : s’informer, contrôler, diagnostiquer, corriger ou vérifier (voir § 1) |
 | **À quoi ça sert** | La question à laquelle la commande répond, et quand la lancer |
 | **La commande, mot par mot** | Le rôle de chaque mot et de chaque option |
 | **Ce que tu vois** | La sortie **réelle**, relevée sur le lab |
@@ -60,17 +61,19 @@ Juju affiche toujours **deux** états par unité. C’est la clé pour lire tout
 
 L’état normal est **`active` / `idle`**.
 
-### Quel outil pour quoi
+### Les cinq objectifs d’une commande Juju
 
-| Je veux… | Commande |
-|---|---|
-| Savoir si tout va bien | `juju status` |
-| Savoir **depuis quand** un service est en panne | `juju show-status-log` |
-| Savoir **pourquoi** | `juju debug-log` |
-| Voir ou changer un réglage | `juju config` |
-| Lancer une opération d’administration | `juju actions`, `juju run` |
-| Regarder à l’intérieur d’un service | `juju ssh`, `juju exec` |
-| Relancer une unité en erreur | `juju resolved` |
+Une commande Juju se lance toujours pour l’un de ces **cinq objectifs**. Savoir dans lequel on se trouve évite d’enchaîner des commandes au hasard : on sait ce qu’on cherche, donc on sait quand on l’a trouvé.
+
+| Objectif | Question posée | Commandes | Ce qu’elles apportent |
+|---|---|---|---|
+| **S’informer** | Qu’y a-t-il, qui suis-je, à quoi ai-je accès ? | `whoami`, `controllers`, `models`, `show-model`, `status`, `offers`, `actions`, `operations`, `secrets` | Connaître le cloud **avant** d’agir : les bons noms, les bons modèles, les bons droits, et la trace de ce qui a été fait (audit) |
+| **Contrôler** | Tout va-t-il bien ? | `status --format summary`, `status --format short \| grep -v "workload:active"`, `run mysql/0 get-cluster-status` | Un **verdict** rapide : si rien ne s’affiche, tout est `active` ; sinon, la liste des unités à regarder |
+| **Diagnostiquer** | Depuis quand ? Qu’est-ce qui a changé ? Pourquoi ? | `show-status-log`, `config`, `debug-log`, `ssh`, `exec`, `show-unit` | **Dater** la panne, trouver le **réglage modifié**, lire l’**erreur**, regarder **dans** le service |
+| **Corriger** | Comment revenir à l’état voulu ? | `config … --reset`, `resolved`, `exec … config-changed` | Réparer **par Juju**, qui garde la configuration cohérente ; une correction faite à la main dans un conteneur serait écrasée |
+| **Vérifier** | La correction a-t-elle pris ? | Le même test que celui qui révélait le problème, et un test **du service lui-même** (`ceph -s`, une API, une VM) | La preuve : le symptôme a disparu. ⚠ `active` dans Juju ne suffit pas : c’est l’état que le charm **déclare** |
+
+Chaque étape des démos commence par une ligne 🎯 **Objectif** qui indique lequel des cinq elle sert. Le fichier `DEMOS-PANNES.md` du même dossier applique cette méthode à de vraies pannes, provoquées puis corrigées.
 
 **Règle d’or :** Juju sert à **observer et dépanner**. Pour changer l’architecture (ajouter un service, un nœud, changer de version), passer par `sunbeam`. Une modification faite avec `juju` peut être **écrasée** par la prochaine commande `sunbeam`.
 
@@ -106,9 +109,11 @@ Exemple : `juju status -m openstack keystone --format short`
 
 ## 3. Démo 1 : se repérer dans Juju (5 min) ✅
 
-**Objectif :** savoir qui on est, sur quel contrôleur, et quels modèles existent. C’est le préalable à toute autre commande.
+**But de la démo :** savoir qui on est, sur quel contrôleur, et quels modèles existent. C’est le préalable à toute autre commande.
 
 ### Étape 0 : renouveler la session
+
+🎯 **Objectif : préalable.** Sans session valide, aucune commande Juju ne répond ; on élimine d’emblée cette fausse panne.
 
 ```bash
 sunbeam utils juju-login
@@ -117,6 +122,8 @@ sunbeam utils juju-login
 **À quoi ça sert :** après un redémarrage du lab, la session Juju a souvent expiré. Sans cette commande, Juju répond `Failed to login to Juju Controller`. **Ce que tu vois :** `Juju re-login complete.`
 
 ### Étape 1 : qui suis-je ?
+
+🎯 **Objectif : s’informer.** Vérifier avec quel compte et sur quel contrôleur on travaille, avant toute action : on évite d’agir sur le mauvais cloud ou de se heurter à des droits insuffisants.
 
 ```bash
 juju whoami
@@ -139,6 +146,8 @@ User:        sunbeam
 | `User` | `sunbeam` | L’utilisateur Juju avec lequel `sunbeam utils juju-login` t’a connecté |
 
 ### Étape 2 : les contrôleurs
+
+🎯 **Objectif : s’informer.** Repérer, parmi les contrôleurs connus de cette machine, celui qui pilote le cloud.
 
 ```bash
 juju controllers
@@ -165,6 +174,8 @@ sunbeam-controller*  -      sunbeam  superuser                            3     
 `localhost-localhost` est un contrôleur LXD local, **sans rapport** avec OpenStack. Celui du cloud est `sunbeam-controller`.
 
 ### Étape 3 : les modèles
+
+🎯 **Objectif : s’informer.** Connaître les espaces de travail et leur **nom exact**, celui qu’il faudra donner à `-m` dans toutes les commandes suivantes.
 
 ```bash
 juju models
@@ -202,6 +213,8 @@ admin/openstack-machines  star-heron/default        manual      available       
 
 ### Étape 4 : le détail d’un modèle
 
+🎯 **Objectif : s’informer (audit).** Savoir à qui appartient un modèle, de quel type il est, et combien de secrets il garde : utile pour un contrôle de sécurité.
+
 ```bash
 juju show-model openstack | grep -E "owner|type|num-secrets"
 ```
@@ -223,9 +236,11 @@ juju show-model openstack | grep -E "owner|type|num-secrets"
 
 ## 4. Démo 2 : un état de santé en 30 secondes (5 min) ✅
 
-**Objectif :** répondre à la question « est-ce que tout va bien ? », et si non, trouver **où** est le problème.
+**But de la démo :** répondre à la question « est-ce que tout va bien ? », et si non, trouver **où** est le problème.
 
 ### Étape 1 : les compteurs
+
+🎯 **Objectif : contrôler.** Un verdict global en une commande : toutes les unités sont-elles `active` ?
 
 ```bash
 juju status -m openstack --format summary
@@ -245,6 +260,8 @@ juju status -m openstack --format summary
 **Comment le lire :** 25 unités, et **25** en `active`. Si une unité allait mal, une ligne comme `blocked: 1` apparaîtrait. `Machines: (0)` est normal : dans un modèle Kubernetes, les unités sont des pods, pas des machines.
 
 ### Étape 2 : seulement ce qui ne va pas
+
+🎯 **Objectif : contrôler.** Si le verdict n’est pas bon, isoler **les seules unités** en anomalie, au lieu de lire 25 lignes.
 
 ```bash
 juju status -m openstack --format short | grep -v "workload:active"
@@ -271,6 +288,8 @@ Une ligne au format `short`, pour comprendre ce qu’on filtre :
 **Comment le lire :** l’agent est au repos (`idle`) mais le service n’est pas prêt : MicroCeph a besoin d’une intervention (`blocked`), et cinder-volume attend MicroCeph (`waiting`). Le premier est la **cause**, le second la **conséquence**. La démo 4 cherche la cause.
 
 ### Étape 3 : le tableau d’une application
+
+🎯 **Objectif : diagnostiquer.** Sur une application suspecte, lire le détail : version, message du charm, unité leader, adresse.
 
 ```bash
 juju status -m openstack keystone
@@ -330,6 +349,8 @@ keystone-endpoints    keystone     keystone-k8s  440  1/1        identity-servic
 
 ### Étape 4 : la machine et le lien entre les modèles
 
+🎯 **Objectif : s’informer.** Voir ce qui tourne sur la machine, et comment ses composants sont fournis au modèle `openstack` : c’est ce qui explique qu’une panne de Ceph apparaisse dans les deux modèles.
+
 ```bash
 juju status -m admin/openstack-machines
 ```
@@ -368,6 +389,8 @@ microceph           microceph      microceph      331  1/1        ceph          
 
 ### Étape 5 : les offres en détail
 
+🎯 **Objectif : contrôler.** Vérifier que les liens entre les deux modèles sont bien établis (`joined`).
+
 ```bash
 juju offers -m admin/openstack-machines
 ```
@@ -391,6 +414,8 @@ microceph-ceph-rgw  -
 **Contexte :** après chaque redémarrage du lab, des unités `*-mysql-router` passaient en erreur, et Keystone répondait `HTTP 500` à toute connexion, donc plus rien ne marchait. On rejoue l’enquête avec la méthode **quand → quoi → pourquoi → corriger**.
 
 ### Étape 1 : quand, et quoi ? L’historique de l’unité
+
+🎯 **Objectif : diagnostiquer (quand ?).** Dater le début de la panne, pour la relier à un événement : redémarrage, mise à jour, changement de configuration.
 
 ```bash
 juju show-status-log -m openstack keystone-mysql-router/0
@@ -420,6 +445,8 @@ juju show-status-log -m openstack keystone-mysql-router/0
 Ici : le 16 octobre à 12 h 39 (le redémarrage du lab), le hook `start` échoue **trois fois** en trois minutes.
 
 ### Étape 2 : pourquoi ? Les journaux du charm
+
+🎯 **Objectif : diagnostiquer (pourquoi ?).** Lire l’erreur précise qui a fait échouer le charm.
 
 ```bash
 juju debug-log -m openstack --replay --no-tail --level ERROR --include keystone-mysql-router/0 | tail -4
@@ -458,6 +485,8 @@ unit-keystone-mysql-router-0: … cannot open api: unable to connect to API: dia
 
 ### Étape 3 : corriger
 
+🎯 **Objectif : corriger, puis vérifier.** Relancer l’étape qui a échoué, une fois la cause disparue, et constater le retour à `active`.
+
 ```bash
 juju resolved -m openstack keystone-mysql-router/0
 ```
@@ -482,6 +511,8 @@ juju status -m openstack --format short | grep "agent:error"
 
 ### Étape 1 : le message du charm
 
+🎯 **Objectif : diagnostiquer (quoi ?).** Lire ce que le charm dit de lui-même : c’est le premier indice.
+
 ```bash
 juju status -m admin/openstack-machines microceph
 ```
@@ -495,6 +526,8 @@ microceph/0*  blocked  idle  0  10.0.2.15  (workload) Error in charm (see logs):
 **Comment le lire :** le service est `blocked`, l’agent est au repos (`idle`). Le message dit que le **charm** a eu une erreur (`Error in charm`), un délai dépassé (`timed out`), et renvoie aux journaux.
 
 ### Étape 2 : quand ?
+
+🎯 **Objectif : diagnostiquer (quand ?).** Dater le blocage pour le relier au démarrage de la machine.
 
 ```bash
 juju show-status-log -m admin/openstack-machines microceph/0 | tail -6
@@ -513,6 +546,8 @@ juju show-status-log -m admin/openstack-machines microceph/0 | tail -6
 
 ### Étape 3 : pourquoi ?
 
+🎯 **Objectif : diagnostiquer (pourquoi ?).** Trouver dans les journaux l’erreur exacte et l’endroit du charm où elle s’est produite.
+
 ```bash
 juju debug-log -m admin/openstack-machines --replay --no-tail --include microceph/0 | grep -B2 -A3 -m1 "Traceback"
 ```
@@ -529,6 +564,8 @@ juju debug-log -m admin/openstack-machines --replay --no-tail --include microcep
 **Comment le lire :** pendant sa phase `Bootstrapping`, le charm a appelé sa vérification `is_ready` (« MicroCeph est-il prêt ? ») ; MicroCeph, lent à répondre pendant le démarrage de la machine, a dépassé le délai. Le charm s’est arrêté en `blocked`, **et n’a jamais réessayé**.
 
 ### Étape 4 : et Ceph lui-même ?
+
+🎯 **Objectif : vérifier.** Tester le **service** lui-même, indépendamment de ce que déclare le charm : c’est ce test qui dit s’il y a une vraie panne.
 
 ```bash
 juju ssh -m admin/openstack-machines 0 "sudo microceph status | head -5; sudo ceph -s | grep -E 'osd:|pgs:'"
@@ -552,6 +589,8 @@ MicroCeph deployment summary:
 
 ### Étape 5 : débloquer le charm
 
+🎯 **Objectif : corriger.** Faire refaire au charm ses vérifications, pour qu’il constate que le service est sain.
+
 `juju resolved` ne sert pas ici (l’agent n’est pas en erreur). Il faut faire **rejouer** au charm son hook de configuration :
 
 ```bash
@@ -566,9 +605,11 @@ Le charm refait ses vérifications, trouve Ceph prêt et repasse en `active` (de
 
 ## 7. Démo 5 : modifier un réglage, le voir appliqué, revenir en arrière (10 min) ✅
 
-**Objectif :** comprendre comment Juju applique une configuration, et ce que cela coûte.
+**But de la démo :** comprendre comment Juju applique une configuration, et ce que cela coûte.
 
 ### Étape 1 : lire la valeur actuelle
+
+🎯 **Objectif : s’informer, puis diagnostiquer.** Connaître la valeur d’un réglage et surtout son **origine** : `default` (jamais touché) ou `user` (modifié). Devant un comportement inattendu, ce sont les `user` qu’on regarde en premier.
 
 ```bash
 juju config -m openstack keystone log-level
@@ -598,6 +639,8 @@ saml-x509-keypair =  ( user )
 
 ### Étape 2 : regarder le fichier dans le conteneur
 
+🎯 **Objectif : vérifier.** Voir la valeur que le service **utilise réellement**, dans son propre fichier de configuration.
+
 ```bash
 sudo k8s kubectl -n openstack exec keystone-0 -c keystone -- grep -E "^level" /etc/keystone/logging.conf | sed -n 2p
 ```
@@ -607,6 +650,8 @@ sudo k8s kubectl -n openstack exec keystone-0 -c keystone -- grep -E "^level" /e
 **Ce que tu vois :** `level=WARNING`.
 
 ### Étape 3 : modifier
+
+🎯 **Objectif : corriger (modifier un réglage).** Changer une valeur par Juju, qui la reporte lui-même dans le bon fichier du service.
 
 ```bash
 juju config -m openstack keystone log-level=INFO
@@ -624,6 +669,8 @@ watch -n 3 "juju status -m openstack keystone --format short"
 **Comment le lire :** Juju a déclenché le hook `config-changed` ; le charm a réécrit le fichier et redémarré Keystone, en **20 secondes**. Relancer la commande de l’étape 2 : `level=INFO`.
 
 ### Étape 4 : revenir à la valeur d’origine
+
+🎯 **Objectif : corriger, puis vérifier.** Annuler la modification proprement avec `--reset`, et contrôler que le service est revenu à sa valeur d’origine.
 
 ```bash
 juju config -m openstack keystone --reset log-level
@@ -649,9 +696,11 @@ juju config -m openstack keystone log-level
 
 ## 8. Démo 6 : utiliser une action (5 min) ✅
 
-**Objectif :** utiliser une opération d’administration prévue par le charm, plutôt qu’une commande tapée à la main dans le conteneur.
+**But de la démo :** utiliser une opération d’administration prévue par le charm, plutôt qu’une commande tapée à la main dans le conteneur.
 
 ### Étape 1 : les actions disponibles
+
+🎯 **Objectif : s’informer.** Savoir quelles opérations d’administration le charm propose : sauvegarde, bascule, contrôle avant mise à jour…
 
 ```bash
 juju actions -m openstack mysql
@@ -673,6 +722,8 @@ restore              Restore a database backup using xtrabackup. …
 **Comment le lire :** chaque ligne est une opération que le charm sait faire, avec sa description. On y trouve la sauvegarde et la restauration, la bascule, et le contrôle avant mise à jour.
 
 ### Étape 2 : lancer une action
+
+🎯 **Objectif : contrôler.** Ici, demander à MySQL l’état de son cluster : un contrôle de santé que seul le charm sait faire proprement.
 
 ```bash
 juju run -m openstack mysql/0 get-cluster-status
@@ -706,6 +757,8 @@ C’est **attendu** sur le lab : `database: single` dans le manifeste (guide `3-
 
 ### Étape 3 : la trace des opérations
 
+🎯 **Objectif : s’informer (audit).** Savoir quelles actions ont été lancées, quand, et sur quelle unité.
+
 ```bash
 juju operations -m openstack | tail -4
 ```
@@ -729,9 +782,11 @@ Les lignes 67 et 69 n’ont été lancées par **personne** à la main : c’est
 
 ## 9. Démo 7 : du charm au service (10 min) ✅
 
-**Objectif :** comprendre ce qu’est concrètement une unité, et où sont rangés les mots de passe.
+**But de la démo :** comprendre ce qu’est concrètement une unité, et où sont rangés les mots de passe.
 
 ### Étape 1 : entrer dans les unités
+
+🎯 **Objectif : diagnostiquer.** Regarder **dans** le conteneur du service ou sur la machine, quand l’état Juju ne suffit plus.
 
 ```bash
 juju ssh -m openstack --container keystone keystone/0 "hostname; grep -c . /etc/keystone/keystone.conf"
@@ -761,6 +816,8 @@ Une unité Kubernetes est donc **un pod à plusieurs conteneurs** : `charm` (l�
 ⚠ Ce qu’on modifie à la main dans un conteneur **disparaît** au prochain redémarrage du pod ou à la prochaine reconfiguration du charm.
 
 ### Étape 2 : les secrets
+
+🎯 **Objectif : s’informer (audit de sécurité).** Savoir quels mots de passe et certificats existent, qui les possède et qui peut les lire, **sans** les afficher.
 
 ```bash
 juju secrets -m openstack | head -5
@@ -804,14 +861,14 @@ Sans `--reveal`, `show-secret` ne montre que ces métadonnées : c’est ce qu�
 
 ## 10. Autres commandes utiles
 
-| Commande | À quoi ça sert | Remarque |
-|---|---|---|
-| `juju status -m openstack --relations keystone` | Ajouter la liste des relations de l’application | |
-| `juju show-application -m openstack keystone` | La fiche de l’application : charm, relations, adresses | |
-| `juju show-unit -m openstack keystone/0` | Les données échangées par relation : base `keystone` via le routeur MySQL (port 6446), RabbitMQ… | ⚠ Contient des **références de secrets** |
-| `juju debug-log -m openstack --include keystone/0` | Suivre les journaux en direct (Ctrl+C pour arrêter) | Sans `--replay` : seulement les nouvelles lignes |
-| `watch -n 10 juju status -m openstack` | Suivre l’état en continu | `juju status --watch` ne marche que dans un vrai terminal |
-| `sudo k8s kubectl -n openstack logs keystone-0 -c keystone` | Journaux **du service** (requêtes API), et non du charm | Juju ne montre que les journaux du charm |
+| Commande | Objectif | À quoi ça sert | Remarque |
+|---|---|---|---|
+| `juju status -m openstack --relations keystone` | S’informer | Ajouter la liste des relations de l’application, pour savoir de quels autres services elle dépend | |
+| `juju show-application -m openstack keystone` | S’informer | La fiche de l’application : charm, relations, adresses | |
+| `juju show-unit -m openstack keystone/0` | Diagnostiquer | Les données échangées par relation : base `keystone` via le routeur MySQL (port 6446), RabbitMQ… Utile quand un service n’arrive pas à joindre un autre | ⚠ Contient des **références de secrets** |
+| `juju debug-log -m openstack --include keystone/0` | Diagnostiquer | Suivre les journaux en direct pendant qu’on reproduit un problème (Ctrl+C pour arrêter) | Sans `--replay` : seulement les nouvelles lignes |
+| `watch -n 10 juju status -m openstack` | Contrôler | Suivre l’état en continu pendant une intervention, pour voir le moment où tout redevient `active` | `juju status --watch` ne marche que dans un vrai terminal |
+| `sudo k8s kubectl -n openstack logs keystone-0 -c keystone` | Diagnostiquer | Journaux **du service** (requêtes API), et non du charm : là où l’on voit les erreurs des utilisateurs | Juju ne montre que les journaux du charm |
 
 **Ce qu’on ne fait pas avec Juju sur ce cloud** : `deploy`, `remove-application`, `integrate`, `refresh`, `scale-application`. Ces opérations changent l’architecture : elles passent par `sunbeam`, et n’ont volontairement pas été exécutées.
 
