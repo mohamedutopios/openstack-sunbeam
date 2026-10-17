@@ -604,6 +604,46 @@ cinder-volume         2024.1-4c94ab3f        137    2024.1/stable  canonical**  
 
 Le snap s’appelle `cinder-volume`. `held` = ses mises à jour automatiques sont suspendues : elles sont pilotées par le charm, pas par le système.
 
+**Que veut dire le `0` de `juju ssh … 0` ?** C’est le **numéro de la machine** dans le modèle. Juju numérote les machines d’un modèle à partir de 0 ; la liste est la section `Machine` de `juju status` :
+
+```bash
+juju status -m admin/openstack-machines | sed -n '/^Machine/,/^$/p'
+```
+
+```text
+Machine  State    Address    Inst id               Base          AZ  Message
+0        started  10.0.2.15  manual:192.168.56.10  ubuntu@24.04      Manually provisioned machine
+```
+
+| Colonne | Signification |
+|---|---|
+| `Machine 0` | Le numéro, à donner à `juju ssh` |
+| `Inst id manual:192.168.56.10` | La machine a été ajoutée à la main, par son adresse : c’est **la VM Lab-Sunbeam** |
+| `Base ubuntu@24.04` | Son système |
+
+`juju ssh` accepte soit un **numéro de machine** (`0`), soit une **unité** (`cinder-volume/0`). Sur ce lab à un seul nœud, on est **déjà** sur la machine `0` : `juju ssh … 0 "commande"` donne le même résultat que `commande` tapée directement. On passe quand même par Juju pour prendre l’habitude : sur un cloud de plusieurs nœuds, c’est Juju qui sait sur quelle machine tourne l’unité, et `juju ssh` y va sans qu’on ait à connaître son adresse.
+
+**Qu’est-ce que `snap`, et quel rapport avec `systemctl` ?** `snap` est le système de **paquets** d’Ubuntu, comme `apt` : il installe, met à jour et retire des logiciels, chacun dans son paquet isolé (un *snap*). Un snap peut contenir des **services**, et pour les faire tourner, il s’appuie sur **systemd**, exactement comme les autres services Linux. Chaque service de snap est une unité systemd nommée `snap.NOM_DU_SNAP.NOM_DU_SERVICE` :
+
+```bash
+systemctl status snap.cinder-volume.cinder-volume --no-pager | head -3
+```
+
+```text
+○ snap.cinder-volume.cinder-volume.service - Service for snap application cinder-volume.cinder-volume
+     Loaded: loaded (/etc/systemd/system/snap.cinder-volume.cinder-volume.service; enabled; preset: enabled)
+     Active: inactive (dead) since Sat 2026-10-17 15:04:12 UTC; 12min ago
+```
+
+| Commande `snap` | Équivalent `systemctl` | Ce que `snap` ajoute |
+|---|---|---|
+| `snap services cinder-volume` | `systemctl status snap.cinder-volume.*` | Tous les services du snap d’un coup, sans connaître leurs noms systemd |
+| `sudo snap stop cinder-volume` | `sudo systemctl stop snap.cinder-volume.cinder-volume` | L’opération est **enregistrée** dans l’historique de `snapd` |
+| `sudo snap start cinder-volume` | `sudo systemctl start …` | Idem |
+| `snap changes` | *(aucun)* | **L’historique des opérations** : installations, mises à jour, arrêts, démarrages, avec leur heure |
+
+C’est cette dernière ligne qui nous intéresse : `systemctl` sait qu’un service **est** arrêté, mais pas **qui** l’a arrêté ni par quel moyen ; `snap changes` garde la trace d’un `snap stop`. (Le journal `journalctl`, plus bas, montre l’arrêt vu par systemd.)
+
 `juju ssh` exécute des commandes sur la machine `0` :
 
 ```bash
