@@ -534,6 +534,32 @@ sunbeam cloud-config -a -c sunbeam-admin -u -f ~/clouds-equipe.yaml --no-hints
 
 La première ligne crée le profil `sunbeam` (compte `demo`) ; la seconde **ajoute** le profil `sunbeam-admin` (compte `admin`) dans le même fichier. On donne un nom différent avec `-c` pour que les deux profils ne portent pas le même nom.
 
+**Ce que tu vois :** chaque commande répond `Writing cloud information to /home/vagrant/clouds-equipe.yaml ... done`. Le fichier obtenu (`sed -E "s/(password: ).*/\1********/" ~/clouds-equipe.yaml` pour l’afficher sans les mots de passe) :
+
+```yaml
+clouds:
+  sunbeam:
+    auth:
+      auth_url: http://cloud.lab.test/openstack-keystone/v3
+      password: ********
+      project_domain_name: users
+      project_name: demo
+      user_domain_name: users
+      username: demo
+    region_name: RegionOne
+  sunbeam-admin:
+    auth:
+      auth_url: http://cloud.lab.test/openstack-keystone/v3
+      password: ********
+      project_domain_name: admin_domain
+      project_name: admin
+      user_domain_name: admin_domain
+      username: admin
+    region_name: RegionOne
+```
+
+**Comment le lire :** deux profils sous `clouds:`. `sunbeam` = le compte `demo`, dans le domaine `users` ; `sunbeam-admin` = le compte `admin`, dans `admin_domain`. Même adresse de Keystone et même région pour les deux.
+
 🔎 **Vérifier que les profils fonctionnent :**
 
 ```bash
