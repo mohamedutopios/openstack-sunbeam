@@ -10,6 +10,7 @@ Ce document complète `README.md` du même dossier. Le guide de référence expl
 | 2 | Panne : « Je ne peux plus envoyer mes images » | 20 min |
 | 3 | Panne : « Mes volumes restent en erreur » | 20 min |
 | 4 | Donner aux équipes une vue web du cloud, en lecture seule : Juju Dashboard | 20 min |
+| 5 | Panne : « Plus personne ne peut créer de VM », une panne que Juju **voit**, suivie dans le dashboard | 25 min |
 
 ---
 
@@ -1195,6 +1196,302 @@ User "lab-dashboard" removed
 puis, une minute plus tard, seule l’application `controller` dans le modèle, et seuls les comptes `admin` et `sunbeam`.
 
 **Comment le lire :** pendant la suppression, `dashboard` apparaît quelques secondes en `unknown`, avec `Scale 0` : l’unité est déjà partie, l’application va suivre.
+
+---
+
+## Partie 5 : « Plus personne ne peut créer de VM », une panne que Juju voit (25 min)
+
+### Situation
+
+Dans les parties 2 et 3, Juju affichait `active` pendant la panne. Ici, au contraire, la panne **change l’état Juju** : elle apparaît dans `juju status` et dans le **dashboard** de la partie 4. Le but est de comprendre **quand** Juju voit une panne, et de suivre celle-ci de bout en bout dans l’interface web.
+
+**Avant de commencer :** le dashboard de la partie 4 est installé, le relais `juju dashboard` et le tunnel SSH sont ouverts, et tu es connecté avec `lab-dashboard`. Le modèle `openstack` affiche **25 active**.
+
+### Comprendre d’abord : comment un charm Kubernetes surveille son service
+
+Chaque conteneur de service est piloté par **Pebble**, un petit gestionnaire de processus qui démarre le service et le **teste à intervalles réguliers**. Le charm de Placement lui a confié le service et deux contrôles. On les lit dans le **plan** Pebble du conteneur :
+
+```bash
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- /charm/bin/pebble plan
+```
+
+**La commande, mot par mot :** `exec placement-0 -c placement-api --` = exécuter dans le conteneur du service (voir partie 2 pour trouver ces noms) ; `/charm/bin/pebble` = l’outil Pebble, déposé dans chaque conteneur par Juju ; `plan` = sa configuration.
+
+**Ce que tu vois** (extrait) :
+
+```text
+services:
+    wsgi-placement-api:
+        summary: placement-api wsgi
+        command: /usr/sbin/apache2 -DFOREGROUND -DNO_DETACH
+checks:
+    online:
+        level: ready
+        period: 10s
+        threshold: 3
+        http:
+            url: http://localhost:8778/
+    up:
+        level: alive
+        period: 10s
+        threshold: 3
+        exec:
+            command: service apache2 status
+```
+
+**Comment le lire :**
+
+| Élément | Signification |
+|---|---|
+| `wsgi-placement-api` | Le service : Apache, qui fait tourner l’API Placement |
+| Contrôle `online`, niveau **`ready`** | Toutes les 10 s, une requête HTTP sur le port 8778 : **le service répond-il correctement ?** |
+| Contrôle `up`, niveau **`alive`** | Toutes les 10 s, `service apache2 status` : **le processus tourne-t-il ?** |
+| `threshold: 3` | Un contrôle n’est déclaré en échec qu’après 3 échecs de suite, soit environ 30 s |
+
+Ces deux niveaux sont branchés à Kubernetes, qui interroge Pebble toutes les 5 secondes :
+
+```bash
+sudo k8s kubectl -n openstack get pod placement-0 -o jsonpath='{range .spec.containers[?(@.name=="placement-api")]}{.livenessProbe.httpGet.path}{"\n"}{.readinessProbe.httpGet.path}{end}'; echo
+```
+
+```text
+/v1/health?level=alive
+/v1/health?level=ready
+```
+
+| Si le contrôle en échec est… | Kubernetes… | Le charm… | Effet |
+|---|---|---|---|
+| **`alive`** (le processus est mort) | **Redémarre** le conteneur (*liveness probe*) | Reconfigure tout au redémarrage | Panne **réparée seule**, en moins d’une minute ; visible quelques secondes |
+| **`ready`** seulement (le processus tourne mais répond mal) | Retire le pod du trafic (*readiness probe*), **sans** le redémarrer | Passe l’unité en **`blocked … healthcheck failed`** | Panne **durable et visible**, jusqu’à ce qu’on corrige |
+
+Les deux cas ont été provoqués sur le lab. Le premier, arrêter le service avec `pebble stop wsgi-placement-api`, s’est réparé seul en 59 secondes : Kubernetes a tué et relancé le conteneur (`Container placement-api failed liveness probe, will be restarted`). C’est le second qui fait l’objet de cette partie.
+
+### Provoquer la panne (formateur)
+
+Scénario réaliste : quelqu’un « teste » une modification directement dans le conteneur et l’oublie. Ici, il interdit l’accès à l’API dans la configuration d’Apache :
+
+```bash
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- sed -i "s/Require all granted/Require all denied/" /etc/apache2/sites-available/wsgi-placement-api.conf
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- apache2ctl graceful
+```
+
+**Ce que font les commandes :** la première remplace, dans le fichier du site Placement, l’autorisation d’accès (`Require all granted`) par une interdiction (`Require all denied`) ; la seconde demande à Apache de relire sa configuration **sans** s’arrêter. Le processus continue de tourner : seul le contrôle `ready` va échouer.
+
+### Étape 1 : constater le symptôme
+
+```bash
+source ~/demo-openrc
+openstack server create lab-vm-panne --image ubuntu --flavor m1.tiny --network demo-network --wait -c status -f value
+```
+
+**Ce que tu vois :**
+
+```text
+Error creating server: lab-vm-panne
+```
+
+Et, avec le compte administrateur, l’API Placement elle-même :
+
+```bash
+source ~/admin-openrc
+openstack resource provider list
+```
+
+```text
+Service Unavailable (HTTP 503)
+```
+
+**Comment le lire :** plus aucune VM ne peut être créée, et Placement, l’inventaire des ressources que Nova consulte avant de placer une VM, répond **503** (« service indisponible »). On sait **où** chercher : Placement.
+
+### Étape 2 : ce que Juju sait, cette fois
+
+```bash
+juju status -m openstack placement
+```
+
+**Ce que tu vois** (extrait) :
+
+```text
+App        Version  Status   Scale  Charm          Channel        Rev  Address         Exposed  Message
+placement           blocked      1  placement-k8s  2024.1/stable  266  10.152.183.233  no       (container:placement-api) healthcheck failed: online
+
+Unit          Workload  Agent  Address     Ports  Message
+placement/0*  blocked   idle   10.1.0.139         (container:placement-api) healthcheck failed: online
+```
+
+**Comment le lire :** l’unité est **`blocked`**, et le message dit tout : dans le conteneur `placement-api`, le contrôle de santé (*healthcheck*) **`online`** échoue. Contrairement aux parties 2 et 3, **Juju voit la panne**, parce que Pebble prévient le charm dès qu’un contrôle échoue.
+
+**Quand :**
+
+```bash
+juju show-status-log -m openstack placement/0 | tail -4
+```
+
+```text
+17 Oct 2026 15:49:02Z  workload   active
+17 Oct 2026 15:51:00Z  juju-unit  executing  running placement-api-pebble-check-failed hook
+17 Oct 2026 15:51:05Z  juju-unit  idle
+17 Oct 2026 15:53:47Z  workload   blocked    (container:placement-api) healthcheck failed: online
+```
+
+**Comment le lire :** à 15:51:00, Pebble signale l’échec au charm, qui exécute l’étape `pebble-check-failed` et passe l’unité en `blocked`. La modification avait été faite à 15:50:21 : le délai correspond aux 3 échecs de suite exigés par le contrôle.
+
+**Pourquoi le charm voit cette panne :** son code réagit à l’événement `pebble-check-failed` en relisant l’état des contrôles de niveau `ready` et en se déclarant `blocked` si l’un d’eux échoue. Le code est dans le conteneur du charm, `/var/lib/juju/agents/unit-placement-0/charm/lib/ops_sunbeam/container_handlers.py` (fonctions `_on_pebble_check_failed` et `_on_update_status`). C’est exactement ce qui manquait au charm `cinder-volume` de la partie 3, qui n’a pas de conteneur Pebble.
+
+### Étape 3 : la voir dans le dashboard
+
+Dans le navigateur, sur http://localhost:31666.
+
+⚠ **Une session ouverte avant la panne ne se met pas à jour de façon fiable.** Sur le lab, elle a continué d’afficher **25 active** et `placement` en `Running`, même après un rechargement de la page (F5). Pour voir l’état réel : **se déconnecter** (icône en bas à gauche, *Log out*) et **se reconnecter**.
+
+**Ce que tu vois après reconnexion :**
+
+| Page | Contenu |
+|---|---|
+| Liste des modèles | **1 blocked**, **1 running** ; le modèle `openstack` passe dans le groupe **BLOCKED**, avec en rouge le message `(container:placement-api) healthcheck failed: online` |
+| Modèle `openstack` | **24 active · 1 blocked** ; la ligne `placement` est **Blocked**, en rouge |
+
+**Comment le lire :** le dashboard affiche **l’état Juju**, ni plus ni moins. Il permet à une équipe de **repérer** une panne d’un coup d’œil, mais il ne dit ni pourquoi, ni comment la corriger : pour cela, on revient à la ligne de commande.
+
+### Étape 4 : comprendre, dans le conteneur
+
+L’état des contrôles, vu par Pebble :
+
+```bash
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- /charm/bin/pebble checks
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- /charm/bin/pebble services
+```
+
+**Ce que tu vois :**
+
+```text
+Check   Level  Startup  Status  Successes  Failures  Change
+online  ready  enabled  down    24         44/3      48 (non-2xx status code 403; <!DOCTYPE H... run "pebble tasks 48" for more)
+up      alive  enabled  up      70         0/3       46
+Service             Startup   Current  Since
+wsgi-placement-api  disabled  active   today at 15:46 UTC
+```
+
+**Comment le lire :**
+
+| Ligne | Signification |
+|---|---|
+| `online … down … 44/3` | Le contrôle HTTP échoue depuis 44 essais (le seuil est 3) |
+| `non-2xx status code 403` | **La cause directe** : Apache répond **403 Forbidden** (« accès interdit ») au lieu de 200 |
+| `up … up … 0/3` | Le processus, lui, tourne : c’est pourquoi Kubernetes ne redémarre rien |
+| `wsgi-placement-api … active` | Le service est démarré |
+
+Le journal du service le confirme :
+
+```bash
+sudo k8s kubectl -n openstack logs placement-0 -c placement-api --since=10m | grep AH01630 | tail -1
+```
+
+```text
+2026-10-17T15:57:50.089Z [wsgi-placement-api] 2026-10-17 15:57:50.089329 AH01630: client denied by server configuration: /usr/bin/placement-api
+```
+
+**Comment le lire :** `AH01630` est le code d’erreur d’Apache pour « client refusé **par la configuration** du serveur ». Ce n’est donc ni un plantage ni un problème de droits OpenStack : c’est la **configuration d’Apache** qui refuse. On regarde le fichier du site (voir partie 2 pour trouver ce type de chemin) :
+
+```bash
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- grep -n "Require all" /etc/apache2/sites-available/wsgi-placement-api.conf
+```
+
+```text
+18:            Require all denied
+```
+
+**Diagnostic :** le fichier d’Apache a été modifié à la main : il interdit tout accès à l’API.
+
+**Et le 503 de l’étape 1 ?** Il ne vient pas de Placement, qui répond 403, mais de **Kubernetes** :
+
+```bash
+sudo k8s kubectl -n openstack get pod placement-0
+sudo k8s kubectl -n openstack get endpoints placement
+```
+
+```text
+NAME          READY   STATUS    RESTARTS       AGE
+placement-0   1/2     Running   21 (12m ago)   8d
+NAME        ENDPOINTS   AGE
+placement               8d
+```
+
+**Comment le lire :** le pod n’a plus qu’**un conteneur sur deux prêt** (`1/2`) : Kubernetes a retiré le conteneur `placement-api` du trafic, car son contrôle `ready` échoue. Le service Kubernetes `placement` n’a donc **plus aucune destination** (`ENDPOINTS` vide), et le répartiteur d’entrée du cloud répond **503** aux clients. C’est la *readiness probe* du tableau du début.
+
+### Étape 5 : corriger, par le charm
+
+Le fichier fautif est **géré par le charm** : il le génère à chaque configuration (sa date de modification, 15:46, correspond au dernier redémarrage du conteneur). On ne le corrige donc pas à la main : on demande au charm de **réappliquer sa configuration**, ce qui réécrit ses fichiers :
+
+```bash
+juju exec -m openstack --unit placement/0 -- "JUJU_DISPATCH_PATH=hooks/config-changed ./dispatch"
+sudo k8s kubectl -n openstack exec placement-0 -c placement-api -- grep -n "Require all" /etc/apache2/sites-available/wsgi-placement-api.conf
+```
+
+**Ce que tu vois :**
+
+```text
+18:            Require all granted
+```
+
+**Comment le lire :** le charm a comparé le fichier à celui qu’il doit produire, l’a réécrit, et a redémarré le service. Pour un charm Kubernetes, `juju exec --unit` s’exécute dans le conteneur `charm` du pod.
+
+Suivre le retour :
+
+```bash
+watch -n 10 "juju status -m openstack placement --format short"
+```
+
+**Ce que tu vois :** `workload:blocked` encore une vingtaine de secondes, le temps que le contrôle `online` réussisse de nouveau, puis `workload:active` (environ une minute après la correction sur le lab). `Ctrl+C` pour sortir.
+
+### Étape 6 : vérifier que la correction a pris
+
+```bash
+sudo k8s kubectl -n openstack get pod placement-0
+sudo k8s kubectl -n openstack get endpoints placement
+source ~/admin-openrc
+openstack resource provider list -c name -f value
+source ~/demo-openrc
+openstack server create lab-vm-ok --image ubuntu --flavor m1.tiny --network demo-network --wait -c status -f value
+```
+
+**Ce que tu vois :**
+
+```text
+NAME          READY   STATUS    RESTARTS       AGE
+placement-0   2/2     Running   21 (13m ago)   8d
+NAME        ENDPOINTS                          AGE
+placement   10.1.0.139:65535,10.1.0.139:8778   8d
+sunbeam
+sunbeam_0000:00:02.0
+ACTIVE
+```
+
+**Comment le lire :** le pod est de nouveau `2/2`, le service Kubernetes a retrouvé sa destination (port 8778), Placement répond, et une VM est créée : **le symptôme a disparu.**
+
+Dans le dashboard, **après reconnexion** : **2 running**, et le modèle `openstack` revient à **25 active**.
+
+### Nettoyer
+
+```bash
+openstack server delete lab-vm-ok lab-vm-panne --wait
+openstack server list
+```
+
+✅ **Attendu :** une liste vide.
+
+### À retenir
+
+| | Partie 3 (`cinder-volume`) | Partie 5 (Placement) |
+|---|---|---|
+| Où tourne le service | Snap, sur la machine | Conteneur Kubernetes, piloté par Pebble |
+| Qui le surveille | Personne : le charm ne teste pas le service | Pebble, toutes les 10 s, et Kubernetes, toutes les 5 s |
+| Panne visible dans Juju et le dashboard ? | Non, `active` | **Oui**, `blocked … healthcheck failed` |
+| Réparation automatique ? | Non | Oui si le **processus** meurt (redémarrage du conteneur) ; non s’il **répond mal** |
+
+- Une panne n’est visible dans Juju, donc dans le dashboard, que si **quelqu’un la teste** et le signale au charm.
+- Le dashboard sert à **repérer** ; le diagnostic se fait à la ligne de commande. Et une session ouverte doit être **renouvelée** pour refléter l’état réel.
+- Ne jamais modifier à la main un fichier géré par un charm : la prochaine configuration l’écrasera. Ici, c’est justement ce qui a servi à réparer.
 
 ---
 
