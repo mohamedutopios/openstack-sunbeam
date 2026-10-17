@@ -11,6 +11,7 @@ Ce document complète `README.md` du même dossier. Le guide de référence expl
 | 3 | Panne : « Mes volumes restent en erreur » | 20 min |
 | 4 | Donner aux équipes une vue web du cloud, en lecture seule : Juju Dashboard | 20 min |
 | 5 | Panne : « Plus personne ne peut créer de VM », une panne que Juju **voit**, suivie dans le dashboard | 25 min |
+| 6 | Proposer aux utilisateurs une interface plus moderne qu’Horizon : Skyline, installé à côté, hors Juju | 45 min |
 
 ---
 
@@ -1495,6 +1496,423 @@ openstack server list
 
 ---
 
+## Partie 6 : installer Skyline à côté d’Horizon (45 min)
+
+### Situation
+
+Les utilisateurs trouvent Horizon lent et daté. **Skyline** est l’autre interface web officielle d’OpenStack, plus moderne et plus rapide. On veut la leur proposer **en plus** d’Horizon, sans toucher au cloud lui-même.
+
+### Ce que Sunbeam et Juju permettent, ou non
+
+Avant d’installer quoi que ce soit, on vérifie s’il existe une méthode prise en charge :
+
+```bash
+juju find skyline
+sunbeam list-features -f yaml | grep -i -E "sky|dash|horizon"
+```
+
+**Ce que tu vois :**
+
+```text
+No matching charms or bundles
+```
+
+et rien pour la seconde commande.
+
+**Comment le lire :** Charmhub ne propose **aucun** charm Skyline (les noms `skyline-k8s`, `skyline-apiserver`, `skyline-console` donnent aussi `No information found` avec `juju info`), et Sunbeam n’a pas de fonctionnalité Skyline. Horizon, lui, fait partie du **socle** de Sunbeam : on ne peut pas le retirer proprement.
+
+**Conséquence :** Skyline s’installe **à côté**, **hors de Juju et de Sunbeam**, en conteneur. Il n’est donc ni surveillé ni mis à jour par Juju : c’est à l’exploitant de le faire. C’est le compromis à présenter à l’entreprise.
+
+### Comment ça fonctionne
+
+```text
+ Navigateur (Windows)
+   │  http://192.168.56.20:9999
+   ▼
+ Lab-Services : conteneur Docker « skyline »
+   ├── skyline-console  (pages web)
+   ├── nginx            relais vers chaque API du catalogue Keystone   /api/openstack/regionone/nova/ → http://cloud.lab.test/openstack-nova/ …
+   └── skyline-apiserver (connexion, sessions ; base SQLite)
+            │  compte de service lab-skyline (Keystone)
+            ▼
+ Lab-Sunbeam : Keystone, Nova, Neutron, Glance, Cinder… (cloud.lab.test = 192.168.56.201)
+```
+
+**Pourquoi Lab-Services :** Docker y est déjà installé (il fait tourner Keycloak), il a la place nécessaire (3 Go de mémoire libre, 23 Go de disque), et le cloud n’est pas modifié. Skyline n’a besoin que de joindre les API publiques du cloud.
+
+Vérifier ces points :
+
+```bash
+ssh vagrant@192.168.56.20
+sudo docker ps --format "{{.Names}} {{.Image}} {{.Ports}}"
+ss -ltn | grep 9999
+getent hosts cloud.lab.test
+curl -s -o /dev/null -w "%{http_code}\n" --resolve cloud.lab.test:80:192.168.56.201 http://cloud.lab.test/openstack-keystone/v3
+```
+
+**Ce que tu vois :**
+
+```text
+keycloak-keycloak-1 quay.io/keycloak/keycloak:26.8.0 8080/tcp, 9000/tcp, 192.168.56.20:8443->8443/tcp
+keycloak-postgres-1 postgres:17 5432/tcp
+200
+```
+
+**Comment le lire :** Keycloak tourne déjà : on n’y touchera pas. Le port **9999**, celui de Skyline, est libre (aucune ligne). `getent` ne renvoie **rien** : Lab-Services **ne sait pas résoudre** `cloud.lab.test`. Mais Keystone répond (`200`) quand on lui donne l’adresse `192.168.56.201` : il faudra donc fournir ces noms au conteneur.
+
+### Étape 1 : choisir l’image
+
+```bash
+curl -s "https://hub.docker.com/v2/repositories/99cloud/skyline/tags?page_size=30" | python3 -c "import sys,json; [print(t['name'], t['last_updated'][:10]) for t in json.load(sys.stdin)['results']]"
+```
+
+**Ce que tu vois :**
+
+```text
+latest 2026-07-29
+2025.2 2026-05-28
+2023.2 2025-02-11
+2024.1 2024-12-23
+2024.2 2024-11-01
+2023.1 2024-07-03
+zed 2024-03-11
+```
+
+**Comment le lire :** `99cloud/skyline` est l’image « tout-en-un » (console, API et nginx) utilisée par la documentation officielle de Skyline pour une installation en conteneur. Ses étiquettes portent le nom des versions d’OpenStack. Le lab est en **2024.1** (guide `3-sunbeam-cli/`) : on prend `2024.1`, pour rester compatible avec les API du cloud.
+
+```bash
+sudo docker pull 99cloud/skyline:2024.1
+```
+
+**Ce que tu vois** (42 s sur le lab) : `Status: Downloaded newer image for 99cloud/skyline:2024.1`. L’image occupe 1,6 Go sur le disque.
+
+### Étape 2 : créer le compte de service dans Keystone
+
+**Pourquoi :** Skyline interroge Keystone avec **son propre compte** (liste des domaines, des régions, du catalogue), indépendamment des utilisateurs qui se connectent. On le range avec les autres comptes de services Sunbeam : domaine `service_domain`, projet `services` (`openstack project list --domain service_domain` les montre).
+
+Sur **Lab-Sunbeam** :
+
+```bash
+source ~/admin-openrc
+read -s -p "Mot de passe du compte lab-skyline : " SKY_PW; echo
+openstack user create --domain service_domain --password "$SKY_PW" lab-skyline -c name -c enabled
+openstack role add --project services --project-domain service_domain --user lab-skyline --user-domain service_domain admin
+openstack role assignment list --user lab-skyline --user-domain service_domain --names -c Role -c User -c Project
+```
+
+`read -s` lit le mot de passe **sans l’afficher** et le garde dans la variable `SKY_PW` le temps de la session. Note-le : il servira à l’étape 3.
+
+**Ce que tu vois :**
+
+```text
+| enabled | True        |
+| name    | lab-skyline |
++-------+----------------------------+-------------------------+
+| Role  | User                       | Project                 |
++-------+----------------------------+-------------------------+
+| admin | lab-skyline@service_domain | services@service_domain |
++-------+----------------------------+-------------------------+
+```
+
+**Comment le lire :** le compte existe, avec le rôle `admin` sur le projet `services`, comme les comptes de service des autres composants. ⚠ Ce rôle donne des droits étendus : le mot de passe doit être protégé (étape 3).
+
+### Étape 3 : écrire la configuration
+
+Sur **Lab-Services**. Les réglages par défaut de l’image se lisent dans l’image elle-même, sans rien deviner :
+
+```bash
+sudo docker run --rm --entrypoint cat 99cloud/skyline:2024.1 /etc/skyline/skyline.yaml | grep -E "database_url|ssl_enabled|secret_key|keystone_url|system_"
+```
+
+```text
+  database_url: sqlite:////tmp/skyline.db
+  secret_key: aCtmgbcUqYUy_HNVg5BDXCaeJgJQzHJXwqbXr0Nmb2o
+  ssl_enabled: true
+  keystone_url: http://127.0.0.1:5000/v3/
+  system_admin_roles:
+  - system_admin
+  system_project: service
+  system_project_domain: Default
+  system_reader_roles:
+  - system_reader
+  system_user_domain: Default
+  system_user_name: skyline
+  system_user_password: ''
+```
+
+**Comment le lire, et ce qu’il faut changer :**
+
+| Réglage | Par défaut | Problème | Valeur pour le lab |
+|---|---|---|---|
+| `database_url` | `/tmp/skyline.db` | `/tmp` est effacé avec le conteneur | `/var/lib/skyline/skyline.db`, sur un dossier de Lab-Services |
+| `ssl_enabled` | `true` | Skyline attend du HTTPS ; le lab est en HTTP | `false` |
+| `secret_key` | une valeur d’exemple | **Publique** : elle est la même dans toutes les images, elle protège les sessions | Une valeur tirée au hasard |
+| `keystone_url` | `127.0.0.1:5000` | Pas l’adresse de Keystone sur Sunbeam | `http://cloud.lab.test/openstack-keystone/v3/` |
+| `system_*` | `skyline`, `service`, `Default` | Noms d’un autre déploiement | `lab-skyline`, `services`, `service_domain` (étape 2) |
+
+Écrire le fichier, lisible seulement par `root` :
+
+```bash
+sudo mkdir -p /etc/skyline /var/lib/skyline /var/log/skyline
+sudo sh -c "umask 077; cat > /etc/skyline/skyline.yaml" <<'EOF'
+default:
+  database_url: sqlite:////var/lib/skyline/skyline.db
+  debug: false
+  log_dir: /var/log/skyline
+  secret_key: SECRET_A_REMPLACER
+  ssl_enabled: false
+openstack:
+  keystone_url: http://cloud.lab.test/openstack-keystone/v3/
+  default_region: RegionOne
+  interface_type: public
+  system_project: services
+  system_project_domain: service_domain
+  system_user_domain: service_domain
+  system_user_name: lab-skyline
+  system_user_password: MOT_DE_PASSE_A_REMPLACER
+EOF
+K=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+sudo sed -i "s|SECRET_A_REMPLACER|$K|" /etc/skyline/skyline.yaml
+read -s -p "Mot de passe du compte lab-skyline : " SKY_PW; echo
+sudo sed -i "s|MOT_DE_PASSE_A_REMPLACER|$SKY_PW|" /etc/skyline/skyline.yaml
+sudo ls -l /etc/skyline/skyline.yaml
+sudo sed -E "s/(password|secret_key): .*/\1: ********/" /etc/skyline/skyline.yaml
+```
+
+**Ce que tu vois :** `-rw------- 1 root root 491 … /etc/skyline/skyline.yaml`, puis le fichier, secrets masqués. Seul `root` peut le lire : il contient le mot de passe d’un compte administrateur du cloud.
+
+**Un second fichier à corriger, `gunicorn.py`.** Sans lui, l’API de Skyline ne démarre pas sur ce lab (constaté) : son journal répète `connection to /var/lib/skyline/skyline.sock failed: [Errno 95] Operation not supported`. La cause est dans le fichier de l’image :
+
+```bash
+sudo docker run --rm --entrypoint grep 99cloud/skyline:2024.1 -n -E "bind|reuse_port" /etc/skyline/gunicorn.py
+uname -r
+```
+
+```text
+17:bind = "unix:/var/lib/skyline/skyline.sock"
+22:reuse_port = True
+6.8.0-86-generic
+```
+
+**Comment le lire :** l’API écoute sur une socket Unix et demande l’option `reuse_port`. Le noyau 6.8 d’Ubuntu 24.04 refuse cette option sur une socket Unix (`OSError: [Errno 95] Operation not supported`, reproduit sur le lab). On fournit au conteneur une copie du fichier avec l’option désactivée :
+
+```bash
+sudo sh -c "docker run --rm --entrypoint cat 99cloud/skyline:2024.1 /etc/skyline/gunicorn.py > /etc/skyline/gunicorn.py"
+sudo sed -i "s/^reuse_port = True/reuse_port = False/" /etc/skyline/gunicorn.py
+sudo grep -n reuse_port /etc/skyline/gunicorn.py
+```
+
+```text
+22:reuse_port = False
+```
+
+Même ligne 22, valeur changée.
+
+### Étape 4 : initialiser la base
+
+```bash
+sudo docker run --rm --name skyline_bootstrap -e KOLLA_BOOTSTRAP="" \
+  -v /etc/skyline/skyline.yaml:/etc/skyline/skyline.yaml \
+  -v /var/lib/skyline:/var/lib/skyline -v /var/log/skyline:/var/log/skyline \
+  --add-host cloud.lab.test:192.168.56.201 --add-host internal.lab.test:192.168.56.202 \
+  99cloud/skyline:2024.1
+```
+
+**La commande, mot par mot :**
+
+| Morceau | Rôle |
+|---|---|
+| `--rm` | Supprimer ce conteneur à la fin : il ne sert qu’une fois |
+| `-e KOLLA_BOOTSTRAP=""` | Le script de démarrage de l’image ne fait alors **que** créer la base (`make db_sync`), puis s’arrête |
+| `-v source:destination` | Monter un fichier ou un dossier de Lab-Services dans le conteneur : la configuration, la base, les journaux |
+| `--add-host nom:adresse` | Ajouter ce nom au fichier `hosts` **du conteneur** : c’est ainsi qu’il résout `cloud.lab.test`, inconnu de Lab-Services |
+
+**Ce que tu vois** (fin) :
+
+```text
++ make db_sync
+alembic -c skyline_apiserver/db/alembic/alembic.ini upgrade head
+… INFO     | alembic.runtime.migration:run_migrations:619 - Running upgrade  -> 000, init
++ exit 0
+```
+
+`sudo ls -l /var/lib/skyline` montre alors `skyline.db`.
+
+### Étape 5 : démarrer Skyline
+
+```bash
+sudo docker run -d --name skyline --restart=always --net=host \
+  -e LISTEN_ADDRESS=192.168.56.20:9999 \
+  -v /etc/skyline/skyline.yaml:/etc/skyline/skyline.yaml \
+  -v /etc/skyline/gunicorn.py:/etc/skyline/gunicorn.py \
+  -v /var/lib/skyline:/var/lib/skyline -v /var/log/skyline:/var/log/skyline \
+  --add-host cloud.lab.test:192.168.56.201 --add-host internal.lab.test:192.168.56.202 \
+  --add-host rgw.lab.test:192.168.56.203 \
+  99cloud/skyline:2024.1
+```
+
+**Ce qui change par rapport à l’étape 4 :**
+
+| Morceau | Rôle |
+|---|---|
+| `-d --restart=always` | En arrière-plan, et redémarré automatiquement (après un redémarrage de Lab-Services, par exemple) |
+| `--net=host` | Le conteneur utilise directement le réseau de Lab-Services |
+| `-e LISTEN_ADDRESS=192.168.56.20:9999` | nginx n’écoute que sur l’adresse du réseau de gestion du lab |
+| `-v …/gunicorn.py` | La copie corrigée de l’étape 3 remplace celle de l’image |
+| `--add-host rgw.lab.test:…` | **Indispensable** : voir ci-dessous |
+
+**Pourquoi `rgw.lab.test` :** au démarrage, Skyline lit le **catalogue Keystone** et crée un relais nginx vers **chaque** service, y compris le stockage objet, annoncé à `rgw.lab.test`. Sans ce nom, nginx refuse de démarrer (constaté sur le lab : `nginx: [emerg] host not found in upstream "rgw.lab.test" in /etc/nginx/nginx.conf:147`) et le conteneur redémarre en boucle.
+
+Vérifier, 30 secondes après :
+
+```bash
+sudo docker ps --filter name=skyline --format "{{.Names}} {{.Status}}"
+sudo docker inspect skyline --format "RestartCount={{.RestartCount}}"
+sudo grep -E "Listening|Booting worker" /var/log/skyline/skyline-error.log | head -2
+curl -s -o /dev/null -w "console=%{http_code}\n" http://192.168.56.20:9999/
+curl -s http://192.168.56.20:9999/api/v1/contrib/regions; echo
+curl -s http://192.168.56.20:9999/api/v1/contrib/domains; echo
+```
+
+**Ce que tu vois :**
+
+```text
+skyline Up 30 seconds
+RestartCount=0
+[…] INFO [-] Listening at: unix:/var/lib/skyline/skyline.sock (1)
+[…] INFO [-] Booting worker with pid: 24
+console=200
+["RegionOne"]
+["admin_domain","service_domain","Default","users"]
+```
+
+**Comment le lire :**
+
+| Contrôle | Résultat | Signification |
+|---|---|---|
+| `Up 30 seconds`, `RestartCount=0` | Stable | Le conteneur ne redémarre pas en boucle |
+| `Listening at: unix:…skyline.sock` | L’API tourne | La correction de `gunicorn.py` a pris |
+| `console=200` | La page web répond | |
+| `["RegionOne"]`, la liste des domaines | Lus dans Keystone | Le compte `lab-skyline` fonctionne : Skyline est **branché sur Keystone** |
+
+Les relais créés à partir du catalogue :
+
+```bash
+sudo docker exec skyline grep -E "^\s*(location|proxy_pass)" /etc/nginx/nginx.conf | sed -n '6,13p'
+```
+
+```text
+        location /api/openstack/regionone/nova/ {
+            proxy_pass http://cloud.lab.test:80/openstack-nova/;
+        location /api/openstack/regionone/keystone/ {
+            proxy_pass http://cloud.lab.test/openstack-keystone/;
+        location /api/openstack/regionone/glance/ {
+            proxy_pass http://cloud.lab.test:80/openstack-glance/;
+        location /api/openstack/regionone/neutron/ {
+            proxy_pass http://cloud.lab.test:80/openstack-neutron/;
+```
+
+**Comment le lire :** le navigateur ne parle qu’à Skyline ; Skyline transmet chaque appel au bon service du cloud, par le chemin `/api/openstack/<région>/<service>/`.
+
+### Étape 6 : se connecter
+
+Dans le navigateur de Windows : **http://192.168.56.20:9999** (vérifié depuis Windows : la page répond `200`).
+
+**Ce que tu vois :** la page « Welcome, Cloud Platform », avec quatre champs : la région (`RegionOne`, déjà choisie), le domaine, le nom d’utilisateur, le mot de passe.
+
+| Champ | Valeur pour le compte de démonstration |
+|---|---|
+| Domaine | `users` (le domaine du compte `demo` : voir guide `3-sunbeam-cli/`, démo 2) |
+| Nom d’utilisateur | `demo` |
+| Mot de passe | Celui de `~/demo-openrc` sur Lab-Sunbeam (`grep OS_PASSWORD ~/demo-openrc`) |
+
+ℹ La liste des domaines peut s’afficher **vide** au premier clic : elle se remplit une à deux secondes plus tard. Recliquer.
+
+**Ce que tu vois après connexion :** la page d’accueil, « Hello, demo », avec les rôles du compte (`member, reader`), son domaine (`users`), et la consommation des **quotas** du projet : instances et vCPU sans limite, volumes `0 / 10`, capacité `0 / 1000` Go, un routeur, un réseau. Ce sont exactement les valeurs que donne `openstack quota show` (guide `5-openstack-cli/`, § 8.1) : Skyline lit les mêmes API.
+
+### Étape 7 : créer une VM depuis Skyline
+
+Menu **Compute → Instances → Create Instance**. L’assistant a quatre étapes :
+
+| Étape | Ce qu’on y choisit | Pour le test |
+|---|---|---|
+| 1. *Base Config* | Gabarit, image, disque système | Gabarit **`m1.tiny`** ; image : onglet **Others**, puis **`ubuntu`** ; *Boot From Volume* : **No** |
+| 2. *Network Config* | Réseau, groupe de sécurité | **`demo-network`**, groupe **`default`** |
+| 3. *System Config* | Nom, mode de connexion | Nom `lab-skyline-vm` ; *Login Type* : **Password**, avec un mot de passe de test |
+| 4. *Confirm Config* | Récapitulatif | **Confirm** |
+
+**Deux surprises, observées sur le lab :**
+
+- les images n’apparaissent **pas** sous l’onglet « Ubuntu », mais sous **« Others »**. Skyline classe les images selon leur propriété `os_distro`, que les images du lab n’ont pas. En entreprise, on la renseigne : `openstack image set --property os_distro=ubuntu ubuntu` ;
+- le message « Please select Operating System! », pour la même raison, **ne bloque pas** la suite de l’assistant.
+
+**Vérifier, côté cloud et côté Skyline :**
+
+```bash
+source ~/demo-openrc
+openstack server list -c Name -c Status -c Networks -c Flavor
+```
+
+```text
+| lab-skyline-vm | ACTIVE | demo-network=10.20.0.215 | m1.tiny |
+```
+
+Et dans le journal de nginx de Skyline, sur Lab-Services :
+
+```bash
+sudo grep "POST /api/openstack/regionone/nova" /var/log/skyline/skyline-nginx-access.log | tail -1 | cut -c1-140
+```
+
+```text
+192.168.56.20 - - [17/Oct/2026:16:38:22 +0000] "18.375" "18.374" "POST /api/openstack/regionone/nova/v2.1/servers HTTP/1.1" 202 430 …
+```
+
+**Comment le lire :** la VM existe et tourne, et le journal prouve le chemin : la demande de création (`POST …/servers`) est passée par Skyline, qui l’a transmise à Nova ; Nova a répondu **202** (« demande acceptée »). Skyline est bien une interface complète du cloud, au même titre qu’Horizon.
+
+Supprimer la VM de test :
+
+```bash
+openstack server delete lab-skyline-vm --wait
+```
+
+### Si tu vois autre chose
+
+| Ce que tu vois | Cause | Que faire |
+|---|---|---|
+| Le conteneur redémarre en boucle, `host not found in upstream "…lab.test"` dans `docker logs skyline` | Un nom du catalogue Keystone n’est pas résolu dans le conteneur | Ajouter un `--add-host` pour ce nom, recréer le conteneur |
+| `502 Bad Gateway` sur `/api/v1/…`, `Errno 95` dans `skyline-error.log` | `reuse_port` non corrigé | Étape 3, second fichier |
+| Connexion refusée sur la page de connexion | Mot de passe, domaine, ou `system_user_password` faux | `grep -i error /var/log/skyline/skyline.log` ; tester le compte `lab-skyline` avec la commande `openstack` |
+| Connexion qui ne tient pas (retour à la page de connexion) | `ssl_enabled: true` en HTTP | `ssl_enabled: false`, puis `sudo docker restart skyline` |
+
+### Étape 8 : retirer Skyline
+
+Pour revenir à l’état d’origine. Sur **Lab-Services** :
+
+```bash
+sudo docker rm -f skyline
+sudo docker rmi 99cloud/skyline:2024.1
+sudo rm -rf /etc/skyline /var/lib/skyline /var/log/skyline
+sudo docker ps --format "{{.Names}} {{.Status}}"
+```
+
+Sur **Lab-Sunbeam** :
+
+```bash
+source ~/admin-openrc
+openstack user delete --domain service_domain lab-skyline
+```
+
+**Ce que tu vois :** seuls `keycloak-keycloak-1` et `keycloak-postgres-1` restent dans Docker, et le compte `lab-skyline` disparaît de `openstack user list --domain service_domain`.
+
+### À retenir
+
+- Avant d’installer un composant, vérifier ce que **Sunbeam** et **Juju** proposent (`sunbeam list-features`, `juju find`) : ici, rien, d’où une installation **hors** de l’outillage.
+- Un composant installé hors Juju n’est **ni surveillé, ni mis à jour** par Juju et n’apparaît pas dans le dashboard : il faut prévoir sa supervision, ses mises à jour et sa sauvegarde (`/etc/skyline`, `/var/lib/skyline`).
+- Lire la configuration **de l’image** avant de l’utiliser : la clé secrète d’exemple et l’option `ssl_enabled` auraient été des failles ou des pannes.
+- Horizon reste en place : les deux interfaces fonctionnent ensemble, sur les mêmes comptes.
+
+---
+
 ## Remettre le lab dans son état d’origine
 
 Chaque partie se termine par son nettoyage. Pour tout vérifier en une fois :
@@ -1525,3 +1943,5 @@ juju users
 | Modèle `admin/openstack-machines` | Aucune ligne |
 | Modèle `admin/controller` | Seulement `controller/0` |
 | Comptes Juju | `admin` et `sunbeam` |
+| Docker sur Lab-Services (`sudo docker ps`) | Seulement `keycloak-keycloak-1` et `keycloak-postgres-1` |
+| Compte Keystone `lab-skyline` (`openstack user list --domain service_domain`) | Absent |
