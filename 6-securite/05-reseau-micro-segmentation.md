@@ -1,6 +1,6 @@
 # Démo 5 : réseau, isolation entre tenants et micro-segmentation
 
-> **Statut : rédigé, pas encore rejoué sur le lab.** Les commandes `openstack` sont celles des guides `5-openstack-cli/` et du support 13 ; les adresses sont celles du lab. Support : module 13.
+> **Statut : rejouée sur le lab le 18 octobre 2026**, en entier, nettoyage compris. Les sorties citées sont celles de ce jour ; les adresses et identifiants changent d’une installation à l’autre. Support : module 13.
 
 ## Objectif
 
@@ -35,7 +35,15 @@ source ~/admin-openrc
 openstack network list --long -c Name -c Project -c Shared -c "Router Type" -c Subnets
 ```
 
-✅ **Attendu :** `external-network`, marqué **externe** (`Router Type: External`), et `demo-network`, privé au projet `demo`.
+✅ **Attendu** (18 octobre) :
+
+```text
+| Name             | Project                          | Shared | Subnets   | Router Type |
+| demo-network     | acb0976350464f5baa07665d23aad177 | False  | 5b6488b5… | Internal    |
+| external-network | 27b199c003b4440c9212c4e79eae8499 | False  | dea2ca3c… | External    |
+```
+
+**Comment le lire :** `external-network` est **externe** (`Router Type: External`) : il appartient au projet `admin` et n’est pas partagé (`Shared: False`), mais tous les projets peuvent y brancher un routeur ou y prendre une IP flottante. `demo-network` est privé au projet `demo`. Aucun réseau partagé à tous sur ce lab.
 
 | Type | Créé par | Visible par | Usage |
 |---|---|---|---|
@@ -59,9 +67,10 @@ for t in a b; do
   openstack quota set "$(openstack project show lab-sec-$t --domain lab-sec -f value -c id)" \
     --instances 2 --cores 2 --ram 1024 --floating-ips 1 --networks 1 --routers 1
 done
-openstack role assignment list --domain lab-sec --names
 openstack role assignment list --project lab-sec-a --project-domain lab-sec --names
 ```
+
+✅ **Attendu :** `member | lab-sec-a-user@lab-sec | | lab-sec-a@lab-sec`. Le rôle est donné sur le **projet**, pas sur le domaine : le compte ne voit que son tenant.
 
 Deux fonctions pour agir **en tant que** chaque tenant, sans toucher à la session administrateur :
 
@@ -78,7 +87,7 @@ B token issue -c project_id -c expires
 
 ✅ **Attendu :** deux jetons, avec deux `project_id` différents.
 
-⚠ Si le TLS a été activé (démo 4), `OS_AUTH_URL` et `OS_CACERT` viennent de `~/admin-openrc` et restent valables dans ces fonctions.
+⚠ Si le TLS a été activé (démo 1), `OS_AUTH_URL` et `OS_CACERT` viennent de `~/admin-openrc` et restent valables dans ces fonctions.
 
 ## 5.3 Le réseau de chaque tenant
 
@@ -116,17 +125,30 @@ A network list -c Name
 B network list -c Name
 ```
 
-✅ **Attendu :** A voit `lab-sec-a-net` et `external-network`, **pas** `lab-sec-b-net` ; et réciproquement. Ni l’un ni l’autre ne voit `demo-network`.
+✅ **Attendu** (18 octobre) : A voit `lab-sec-a-net` et `external-network`, **pas** `lab-sec-b-net` ; et réciproquement. Ni l’un ni l’autre ne voit `demo-network`.
 
 ## 5.4 Les groupes de sécurité : micro-segmentation du tenant A
 
 ### Le piège du groupe `default`
 
 ```bash
-A security group rule list default -c Direction -c "IP Protocol" -c "Remote IP Prefix" -c "Remote Security Group"
+A security group rule list default -c Direction -c "IP Protocol" -c "IP Range" -c "Remote Security Group"
 ```
 
-✅ **Attendu :** des règles **entrantes** dont la source est le groupe `default` lui-même (`Remote Security Group` = l’identifiant de `default`), et des règles **sortantes** vers tout (`0.0.0.0/0`, `::/0`).
+✅ **Attendu** (18 octobre) :
+
+```text
++-------------+-----------+-----------+--------------------------------------+
+| IP Protocol | IP Range  | Direction | Remote Security Group                |
++-------------+-----------+-----------+--------------------------------------+
+| None        | None      | ingress   | e6757612-0664-4ab2-8262-6e61469e269d |
+| None        | None      | ingress   | e6757612-0664-4ab2-8262-6e61469e269d |
+| None        | 0.0.0.0/0 | egress    | None                                 |
+| None        | ::/0      | egress    | None                                 |
++-------------+-----------+-----------+--------------------------------------+
+```
+
+Deux règles **entrantes** (IPv4 et IPv6), tous protocoles (`None`), dont la source est le groupe `default` lui-même (son identifiant dans `Remote Security Group`), et deux règles **sortantes** vers tout. Dans ce client (7.5.0), la colonne de l’adresse source s’appelle `IP Range`.
 
 **Comment le lire :** toutes les VM placées dans `default` peuvent se joindre librement **entre elles**, sur tous les ports. C’est pratique, mais c’est l’inverse de la micro-segmentation : on n’utilise pas `default` pour les VM de la démo.
 
@@ -148,6 +170,8 @@ A security group rule create sg-db --ingress --protocol icmp --remote-group sg-w
 A security group rule create sg-db --ingress --protocol tcp --dst-port 5432 --remote-group sg-web
 A security group rule list sg-db -c Direction -c "IP Protocol" -c "Port Range" -c "Remote Security Group"
 ```
+
+✅ **Attendu** (18 octobre) : deux règles `ingress` (`icmp`, et `tcp` `5432:5432`) dont le `Remote Security Group` est l’identifiant de `sg-web`, plus deux règles `egress` créées d’office avec tout nouveau groupe (sortie libre).
 
 **La commande, mot par mot :** `--remote-group sg-web` = la source autorisée n’est pas une plage d’adresses, mais **toute VM membre du groupe `sg-web`**, quelle que soit son adresse. Le port `5432` est celui de PostgreSQL : l’essai de connexion se fera au ping, mais la règle montre ce qu’on ouvrirait en vrai.
 
@@ -189,9 +213,13 @@ B_IP=$(B server show lab-sec-b-app -f json -c addresses | python3 -c "import sys
 echo "a-web=$FIP_A  a-db=$DB_IP  b-app=$FIP_B (prive $B_IP)"
 ```
 
-✅ **Attendu :** trois VM `ACTIVE`, deux IP flottantes en `192.168.57.x`, `a-db` en `10.60.1.x`, `b-app` en `10.60.2.x`.
+✅ **Attendu** (18 octobre, 2 minutes pour les trois VM) : trois `ACTIVE` (chacun précédé d’une ligne vide, laissée par l’indicateur d’attente), puis :
 
-⚠ **Attendre 5 à 6 minutes** que les VM finissent de démarrer (guide `3-sunbeam-cli/DEMOS-ENTREPRISE.md`, démo 3 : le démarrage est lent sur ce lab). `A console log show lab-sec-a-web | grep "Cloud-init .* finished"` indique quand `a-web` est prête.
+```text
+a-web=192.168.57.130  a-db=10.60.1.113  b-app=192.168.57.121 (prive 10.60.2.84)
+```
+
+⚠ **Attendre que les VM finissent de démarrer** : `A console log show lab-sec-a-web | grep "Cloud-init .* finished"` indique quand `a-web` est prête (même chose pour `a-db` et, avec `B`, pour `b-app`). Constaté le 18 octobre : 3 à 4 minutes après `ACTIVE`.
 
 ## 5.6 Prouver le cloisonnement
 
@@ -206,6 +234,11 @@ Chaque essai a un résultat attendu. Les essais depuis Lab-Sunbeam passent par l
 | 5 | a-web → b-app, adresse privée | `ssh -i ~/lab-sec-a.pem ubuntu@$FIP_A "ping -c 2 -W 2 $B_IP"` | ⛔ pas de réponse | Aucune route entre `10.60.1.0/24` et `10.60.2.0/24` : réseaux de deux projets |
 | 6 | a-web → b-app, IP flottante | `ssh -i ~/lab-sec-a.pem ubuntu@$FIP_A "ping -c 2 -W 2 $FIP_B"` | ⛔ pas de réponse | Le paquet sort par le routeur de A avec l’adresse externe de ce routeur, qui n’est pas `192.168.57.1` : `sg-b-app` le refuse |
 | 7 | PC → b-app | `ping -c 2 $FIP_B` | ✅ répond | `sg-b-app` autorise le PC |
+| 8 | PC → b-app, SSH | `ssh -o ConnectTimeout=10 ubuntu@$FIP_B hostname` | ⛔ `Connection timed out` | `sg-b-app` n’autorise que le ping : le reste est refusé par défaut |
+
+**Constaté le 18 octobre :** les huit résultats attendus. Les « ✅ » répondent en `0% packet loss` (ou affichent `lab-sec-a-web`), les « ⛔ » en `100% packet loss` ou `Connection timed out`. Pour l’essai 4, `ping -c 2 $DB_IP` depuis Lab-Sunbeam donne `100% packet loss` : l’adresse privée n’est pas joignable de l’extérieur. Le chemin vers les IP flottantes passe bien par le NAT de VirtualBox : `ip route get $FIP_A` affiche `via 10.0.2.2 dev eth0`.
+
+Les variables `FIP_A`, `DB_IP`, `FIP_B` et `B_IP` viennent de l’étape 5.5 : dans une nouvelle session, les redéfinir (mêmes commandes) avant les essais.
 
 **Retirer un droit et le voir disparaître.** Supprimer la règle ICMP de `sg-db`, puis rejouer l’essai 3 :
 
@@ -215,7 +248,7 @@ A security group rule delete "$RULE"
 ssh -i ~/lab-sec-a.pem ubuntu@$FIP_A "ping -c 2 -W 2 $DB_IP"
 ```
 
-✅ **Attendu :** `100% packet loss`. Le changement s’applique **immédiatement**, sans redémarrer la VM. Remettre la règle (`A security group rule create sg-db --ingress --protocol icmp --remote-group sg-web`) et vérifier que le ping revient.
+✅ **Attendu** (18 octobre) : `100% packet loss`. Le changement s’applique **immédiatement**, sans redémarrer la VM. Remettre la règle (`A security group rule create sg-db --ingress --protocol icmp --remote-group sg-web`) : le ping revient (`0% packet loss`) trois secondes plus tard.
 
 **L’isolation, vue de l’administrateur :**
 
@@ -224,11 +257,19 @@ openstack server list --all-projects -c Name -c Networks --name lab-sec
 openstack security group list --all-projects -c Name -c Project | grep -E "sg-|default"
 ```
 
-✅ **Attendu :** les trois VM, et pour chaque projet ses groupes de sécurité **et** son propre groupe `default` : un `default` par projet.
+✅ **Attendu** (18 octobre) : les trois VM, et pour chaque projet ses groupes de sécurité **et** son propre groupe `default` : un `default` par projet (ici cinq : `lab-sec-a`, `lab-sec-b`, `demo`, `admin` et un projet de service). Neutron crée le `default` d’un projet à sa première utilisation du réseau.
 
 ## 5.7 Partager volontairement, sans tout ouvrir : le RBAC réseau
 
 **Situation :** A doit offrir un réseau à B (un réseau de service commun, par exemple), sans le partager avec **tout** le cloud.
+
+Le quota de réseaux du tenant A est à 1 (5.2) : le relever d’abord, sinon la création est refusée (`Quota exceeded`) :
+
+```bash
+openstack quota set "$(openstack project show lab-sec-a --domain lab-sec -f value -c id)" --networks 2
+```
+
+Puis :
 
 ```bash
 A network create lab-sec-a-partage
@@ -239,15 +280,13 @@ B network list -c Name
 A network rbac list
 ```
 
-⚠ Le quota de réseaux du tenant A est à 1 (5.2) : le relever **avant** ces commandes (`openstack quota set "$(openstack project show lab-sec-a --domain lab-sec -f value -c id)" --networks 2`), sinon la création est refusée (`Quota exceeded`).
-
 | Morceau | Rôle |
 |---|---|
 | `network rbac create` | Une règle de partage d’un objet réseau |
 | `--target-project` | Le **seul** projet bénéficiaire (identifiant, ici celui de B) |
 | `--action access_as_shared` | B peut **brancher** des VM sur ce réseau, sans pouvoir le modifier |
 
-✅ **Attendu :** B voit maintenant `lab-sec-a-partage` ; aucun autre projet ne le voit (`openstack network list --project demo …` pour s’en convaincre).
+✅ **Attendu** (18 octobre) : B voit maintenant `lab-sec-b-net`, `external-network` **et** `lab-sec-a-partage` ; la règle apparaît dans `network rbac list` (`Object Type: network`). Aucun autre projet ne le voit. Pour s’en convaincre, depuis le compte `demo`, dans un sous-shell pour ne pas quitter la session administrateur : `(source ~/demo-openrc; openstack network list -c Name)`.
 
 Retirer le partage :
 
@@ -264,21 +303,54 @@ PORT=$(A port list --server lab-sec-a-web -f value -c ID)
 A port show "$PORT" -c port_security_enabled -c allowed_address_pairs -c fixed_ips -c security_group_ids
 ```
 
-✅ **Attendu :** `port_security_enabled: True`, `allowed_address_pairs: []`.
+✅ **Attendu** (18 octobre) : `port_security_enabled | True`, `allowed_address_pairs` vide, l’adresse `10.60.1.x` de la VM et l’identifiant de `sg-web`.
 
 **Comment le lire :** avec la sécurité de port, une VM ne peut émettre qu’avec **son** adresse et **son** adresse MAC : elle ne peut pas usurper l’adresse d’une autre VM. Les groupes de sécurité ne s’appliquent que si elle est active. Une adresse supplémentaire (adresse virtuelle d’une grappe, par exemple) se déclare explicitement avec `--allowed-address`, plutôt que de désactiver la protection.
 
-Repérer les ports sans protection, en audit :
+### Repérer les ports sans protection, en audit
+
+Piège constaté le 18 octobre : `openstack port list --long` n’a **pas** de colonne pour la sécurité de port (colonnes : `Device Owner`, `Fixed IP Addresses`, `ID`, `MAC Address`, `Name`, `Security Groups`, `Status`, `Tags`, `Trunk subports`). Un filtre sur une colonne absente ne trouve jamais rien : l’audit dirait « tout va bien », à tort. Et l’API de Neutron refuse de filtrer sur ce champ (`['port_security_enabled'] is invalid attribute for filtering`). On lit donc tous les ports par l’API, et on trie soi-même :
 
 ```bash
-openstack port list --long -f json | python3 -c "import sys,json; [print(p['ID']) for p in json.load(sys.stdin) if p.get('Port Security') is False]"
+T=$(openstack token issue -f value -c id)
+N=$(openstack endpoint list --service network --interface public -f value -c URL)
+curl -s --cacert "$OS_CACERT" -H "X-Auth-Token: $T" "$N/v2.0/ports?fields=id&fields=device_owner&fields=port_security_enabled" \
+  | python3 -c '
+import sys, json, collections
+ports = json.load(sys.stdin)["ports"]
+c = collections.Counter((p["device_owner"] or "(aucun)", p["port_security_enabled"]) for p in ports)
+for (owner, ps), n in sorted(c.items()): print(f"  {owner:28} protection={ps!s:5} {n}")
+vm = [p["id"] for p in ports if p["device_owner"].startswith("compute:") and not p["port_security_enabled"]]
+print(len(vm), "port(s) de VM sans protection :", vm)'
+openstack token revoke "$T"
 ```
 
-⚠ **à vérifier :** le nom de la colonne (`Port Security`) dans la sortie de `port list --long -f json` du client 7.5.0.
+**La commande, mot par mot :** un jeton administrateur (`T`) et l’adresse de Neutron lue dans le catalogue (`N`) ; la liste de **tous** les ports, réduite à trois champs (`fields=`) ; le programme Python compte les ports par propriétaire (`device_owner`) et par état de la protection, puis liste les ports de **VM** (`compute:…`) sans protection.
+
+✅ **Attendu** (18 octobre, avec les trois VM de la démo) :
+
+```text
+  compute:nova                 protection=True  3
+  network:distributed          protection=False 4
+  network:floatingip           protection=False 2
+  network:router_gateway       protection=False 3
+  network:router_interface     protection=False 3
+0 port(s) de VM sans protection : []
+```
+
+**Comment le lire :** les ports des routeurs, des IP flottantes et les ports `distributed` d’OVN (service de métadonnées) sont sans protection : c’est normal, aucune VM ne s’en sert. Seule la ligne finale compte.
+
+**Prouver que l’audit détecte un écart.** Un simple `member` peut créer un port sans protection :
+
+```bash
+A port create lab-sec-test-port --network lab-sec-a-net --disable-port-security --no-security-group --device-owner compute:nova
+```
+
+Rejouer l’audit : ✅ `1 port(s) de VM sans protection : ['…']` (constaté). Puis `A port delete lab-sec-test-port`.
 
 ## Nettoyage
 
-Dans l’ordre : VM, IP flottantes, routeurs, réseaux, groupes, clés, puis l’identité.
+Dans l’ordre : VM, IP flottantes, routeurs, réseaux, groupes (y compris les `default`), clés, puis l’identité.
 
 ```bash
 A server delete lab-sec-a-web lab-sec-a-db --wait
@@ -288,14 +360,21 @@ A router remove subnet lab-sec-a-router lab-sec-a-subnet; A router delete lab-se
 B router remove subnet lab-sec-b-router lab-sec-b-subnet; B router delete lab-sec-b-router
 A network delete lab-sec-a-net; B network delete lab-sec-b-net
 A security group delete sg-web sg-db; B security group delete sg-b-app
+for t in a b; do
+  P=$(openstack project show lab-sec-$t --domain lab-sec -f value -c id)
+  openstack security group list --project "$P" -f value -c ID | xargs -r openstack security group delete
+done
 A keypair delete lab-sec-a-key; rm -f ~/lab-sec-a.pem
 for t in a b; do openstack project delete lab-sec-$t --domain lab-sec; openstack user delete lab-sec-$t-user --domain lab-sec; done
 openstack domain set --disable lab-sec; openstack domain delete lab-sec
 openstack server list --all-projects --name lab-sec
 openstack floating ip list -c "Floating IP Address" -c Project
+openstack security group list --all-projects -c Name -c Project
 ```
 
-✅ **Attendu :** plus aucune VM `lab-sec`, et aucune IP flottante des projets supprimés. ⚠ Supprimer les ressources **avant** les projets : une VM ou un réseau survit à son projet et devient orphelin.
+✅ **Attendu** (18 octobre) : plus aucune VM `lab-sec`, aucune IP flottante des projets supprimés, et seulement les groupes `default` des projets qui restent.
+
+⚠ **Supprimer les ressources avant les projets** : une ressource survit à son projet et devient orpheline. Constaté le 18 octobre : sans la boucle sur les groupes, les deux groupes `default` des projets `lab-sec` restent après la suppression des projets. Ils ne se suppriment plus alors avec `--project` (le projet n’existe plus dans Keystone : `No project with a name or ID of '…' exists`), mais par leur identifiant : `openstack security group list --all-projects -f value -c ID -c Project`, puis `openstack security group delete <ID>`.
 
 ## À retenir
 
@@ -303,4 +382,4 @@ openstack floating ip list -c "Floating IP Address" -c Project
 - Un réseau **partagé à tous** casse l’isolation : on lui préfère le **RBAC réseau**, qui partage avec un projet désigné.
 - La **micro-segmentation** se fait par groupes de sécurité chaînés (`--remote-group`) : les droits suivent le **rôle** de la VM, pas son adresse.
 - Ne pas mettre les VM dans le groupe `default`, qui laisse ses membres se joindre librement.
-- Chaque règle se **prouve** par un essai, et chaque retrait de règle aussi.
+- Chaque règle se **prouve** par un essai, et chaque retrait de règle aussi. Un audit aussi : un contrôle qui ne trouve jamais rien est peut-être un contrôle qui ne regarde pas.

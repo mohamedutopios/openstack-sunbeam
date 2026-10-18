@@ -2,28 +2,41 @@
 
 Ce dossier accompagne la journée **sécurité** de la formation. Les supports théoriques sont `support/11-openstack-authentification-externe-mots-de-passe-v1.0.html` et `support/13-openstack-micro-segmentation-audit-v1.0.html` ; ici, on **fait**, pas à pas, sur le lab.
 
-> **Statut : rédigé, pas encore rejoué sur le lab.** Les commandes s’appuient sur ce que le lab a déjà montré (TP 1 des `labs-iam/`, guides `3-sunbeam-cli/`, `4-juju-cli/`, `5-openstack-cli/`, guide Keycloak). Les points non vérifiés sont signalés **⚠ à vérifier**, avec la commande qui permet de le faire. Rejouer chaque démo avant de l’utiliser en formation.
+> **Statut : rejoué sur le lab le 18 octobre 2026**, démos 1 à 6, retours arrière compris. Chaque fichier précise ce qui n’a pas été joué : l’import de la CA dans Windows (démo 1), l’affichage dans le navigateur (démo 2), le second facteur de Keystone, impossible sur ce lab (démo 3), `regenerate-password` sur `admin` (démo 4), la centralisation des journaux (démo 6, 6.5). Les sorties citées sont celles de ce jour : les identifiants et adresses changent d’une installation à l’autre.
 
 ## Objectifs de la journée
 
 | Objectif | Démos |
 |---|---|
 | Fédération d’identité, durcissement selon le référentiel ANSSI | 1, 2, 3, 4 |
-| Centralisation des journaux | 6 |
 | Isolation réseau entre tenants | 5 |
+| Centralisation des journaux | 6 |
 
-## Le parcours
+## Le parcours, dans l’ordre où on le joue
 
-| # | Fichier | Thème du programme | Durée indicative |
-|---|---|---|---|
-| 1 | [01-federation-keycloak.md](01-federation-keycloak.md) | Fédération d’identité : une autorité d’authentification externe (Keycloak) | 1 h 30 |
-| 2 | [02-mots-de-passe-anssi.md](02-mots-de-passe-anssi.md) | Politique de mots de passe ANSSI : complexité, expiration, verrouillage, impact sur les comptes de service | 1 h |
-| 3 | [03-rotation-secrets.md](03-rotation-secrets.md) | Rotation des mots de passe de service et des clés de jetons | 45 min |
-| 4 | [04-chiffrement-tls.md](04-chiffrement-tls.md) | Chiffrement des flux : constat, activation, certificats, sécurité par défaut et durcissement | 1 h 15 |
-| 5 | [05-reseau-micro-segmentation.md](05-reseau-micro-segmentation.md) | Réseaux partagés et privés, isolation entre tenants, groupes de sécurité, micro-segmentation | 1 h 30 |
-| 6 | [06-audit-tracabilite.md](06-audit-tracabilite.md) | Journalisation des services, corrélation, centralisation | 1 h 15 |
+Les démos sont numérotées dans l’**ordre où elles se jouent**, qui suit les dépendances techniques. Il diffère un peu de l’ordre du programme, où le chiffrement vient en quatrième position : la fédération SAML exige que l’adresse publique du cloud soit déjà en **HTTPS**, et la politique de mots de passe s’applique dans le Keycloak que la fédération vient de brancher.
 
-**Dépendance entre démos :** la fédération SAML (démo 1) exige que l’adresse publique du cloud soit en **HTTPS**. L’activation du TLS public est décrite en démo 4 (étape 4.3). Si l’on suit l’ordre du programme, faire cette étape **avant** la démo 1, ou l’avoir faite la veille.
+| # | Fichier | Thème du programme | Dépend de | Durée indicative |
+|---|---|---|---|---|
+| 1 | [01-chiffrement-tls.md](01-chiffrement-tls.md) | Chiffrement des flux : constat, activation, certificats, sécurité par défaut et durcissement | — | 1 h 15 |
+| 2 | [02-federation-keycloak.md](02-federation-keycloak.md) | Fédération d’identité : une autorité d’authentification externe (Keycloak) | 1 (HTTPS) | 1 h 30 |
+| 3 | [03-mots-de-passe-anssi.md](03-mots-de-passe-anssi.md) | Politique de mots de passe ANSSI : complexité, expiration, verrouillage, impact sur les comptes de service | 2 (Keycloak branché, compte `alice`) | 1 h |
+| 4 | [04-rotation-secrets.md](04-rotation-secrets.md) | Rotation des mots de passe de service et des clés de jetons | — | 45 min |
+| 5 | [05-reseau-micro-segmentation.md](05-reseau-micro-segmentation.md) | Réseaux partagés et privés, isolation entre tenants, groupes de sécurité, micro-segmentation | — | 1 h 30 |
+| 6 | [06-audit-tracabilite.md](06-audit-tracabilite.md) | Journalisation des services, corrélation, centralisation | — | 1 h 15 |
+
+**Correspondance avec le programme :**
+
+| Programme | Démo |
+|---|---|
+| Fédération d’identité : autorité d’authentification externe | 2 |
+| Politique de mots de passe (référentiel ANSSI) | 3 |
+| Rotation des secrets | 4 |
+| Chiffrement des flux (TLS) | 1 |
+| Réseau et micro-segmentation | 5 |
+| Audit et traçabilité | 6 |
+
+Pour présenter dans l’ordre du programme, on peut **commenter** le chiffrement en quatrième position, à condition de l’avoir **activé** avant la fédération (par exemple la veille, ou en début de journée).
 
 ## L’environnement
 
@@ -56,7 +69,27 @@ Les démos créent des VM et modifient le cloud : elles demandent un lab **en bo
    ```
 
    Attendu : tous les rôles `active`, aucune ligne pour la deuxième commande, et une charge (`load average`) redescendue sous 10 environ.
-4. **Prendre un instantané** de Lab-Sunbeam et de Lab-Services dans VirtualBox (Machine → Prendre un instantané) : les démos 1, 3 et 4 modifient durablement le cloud, l’instantané garantit le retour arrière.
+4. **Prendre un instantané** de Lab-Sunbeam et de Lab-Services dans VirtualBox (Machine → Prendre un instantané) : les démos 1 et 2 modifient durablement le cloud, la démo 3 le realm Keycloak, l’instantané garantit le retour arrière.
+
+## Ce que les tests du 18 octobre ont révélé
+
+Ces points changent la façon de jouer les démos ; chacun est expliqué dans sa démo, avec la preuve (journal ou code lu) et le contournement.
+
+| Démo | Constat | Conséquence |
+|---|---|---|
+| 1 | Un filtre `tcpdump` sur `192.168.56.201` ne voit rien depuis Lab-Sunbeam : Kubernetes (Cilium) remplace l’adresse avant l’envoi | Capturer sur le port (`tcp port 80`) |
+| 1 | TLS s’arrête au répartiteur Traefik ; derrière, HTTP sur le réseau des pods | Limite à connaître, à couvrir sur un cloud à plusieurs nœuds |
+| 1 | Après `sunbeam disable tls`, le cloud reste instable une dizaine de minutes | Attendre et vérifier avant de rendre le cloud |
+| 2 | `sunbeam identity provider add generic saml2` échoue avec une CA privée (Sunbeam rev 1101) | Le fournisseur se déploie avec Juju |
+| 2 | Le charm `keystone-saml-k8s` (rev 134) refuse la CA en base64 seule | Valeur « base64 puis PEM » |
+| 2 | Le charm Keystone (rev 440) n’écrit `trusted_dashboard` que pour OpenID Connect | Pas de connexion SAML par Horizon : test direct sur Keystone |
+| 2 | Désactiver l’utilisateur fantôme dans Keystone ne bloque pas une nouvelle connexion fédérée | Désactiver dans Keycloak, puis couper les jetons |
+| 2 | Le retrait du fournisseur laisse le choix « Keycloak - Lab » dans Horizon | Recréer la relation `trusted-dashboard` et régénérer Horizon |
+| 3 | Keystone n’accepte pas la méthode `totp` | Pas de second facteur pour les comptes locaux |
+| 4 | Les mots de passe générés par les charms font 12 caractères | À signaler dans l’analyse de risque |
+| 4 | Un identifiant d’application ne reçoit que les rôles nommés (`member` sans `reader` ne voit pas les réseaux du projet) | `--role member --role reader` |
+| 5 | `openstack port list --long` n’a pas de colonne pour la sécurité de port | Audit par l’API de Neutron |
+| 6 | Keystone ne nomme pas le compte visé par un échec `401` | Compter par adresse, ou par compte dans Keycloak |
 
 ## Conventions
 
@@ -64,7 +97,7 @@ Les démos créent des VM et modifient le cloud : elles demandent un lab **en bo
 |---|---|
 | **À quoi ça sert** | Le but de l’étape, et ce qu’on en attend en entreprise |
 | **La commande, mot par mot** | Le rôle de chaque morceau |
-| ✅ **Attendu** | Le résultat prévu (non encore observé sur le lab) |
+| ✅ **Attendu** | Le résultat observé sur le lab (la date est indiquée) |
 | **Comment le lire** | L’interprétation |
 | **Si tu vois autre chose** | Les écarts probables et la conduite à tenir |
 | ⚠ **à vérifier** | Syntaxe ou comportement non confirmé : commande de vérification fournie |
