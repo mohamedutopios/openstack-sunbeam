@@ -91,7 +91,41 @@ header.top { display: grid; gap: .8rem; }
 .l-ctl { --c: var(--ctl); --t: var(--tint-ctl); }
 .l-ops { --c: var(--ops); --t: var(--tint-ops); }
 .l-mach { --c: var(--mach); --t: var(--tint-mach); }
-.vms { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr); gap: .9rem; align-items: start; }
+.vms { display: grid; grid-template-columns: minmax(0, 1fr) minmax(9.5rem, .55fr) minmax(0, 2.2fr); gap: .7rem; align-items: start; }
+/* Colonne des liens entre les deux VM */
+.links { display: grid; gap: .55rem; align-content: start; padding-top: 3.2rem; }
+.link { position: relative; background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: .45rem .55rem; font-size: .8rem; line-height: 1.35; min-width: 0; }
+.link .arrow { display: flex; align-items: center; gap: .3rem; font-family: var(--font-mono); font-size: .72rem; color: var(--lc); font-weight: 600; }
+.link .arrow::before, .link .arrow::after { content: ""; flex: 1; height: 2px; background: var(--lc); }
+.link .arrow.left::before { flex: 0 0 .5rem; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-right: 7px solid var(--lc); background: none; }
+.link .arrow.both::before { flex: 0 0 .5rem; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-right: 7px solid var(--lc); background: none; }
+.link .arrow.both::after { flex: 0 0 .5rem; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid var(--lc); background: none; }
+.link b { display: block; font-size: .86rem; margin-top: .15rem; }
+.link small { color: var(--muted); display: block; }
+.link.dns { --lc: var(--svc); }
+.link.nat { --lc: var(--svc); }
+.link.sso { --lc: var(--ctl); }
+.link.ca { --lc: var(--muted); }
+
+/* Schéma fléché des échanges */
+.svgwrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
+.svgwrap svg { display: block; width: 100%; min-width: 760px; height: auto; font-family: var(--font-body); }
+.s-svc { fill: var(--tint-svc); stroke: var(--svc); stroke-width: 2; }
+.s-sun { fill: var(--tint-sun); stroke: var(--sun); stroke-width: 2; }
+.s-win { fill: var(--tint-win); stroke: var(--win); stroke-width: 2; }
+.s-in  { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.s-title { font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.s-t-svc { fill: var(--svc); } .s-t-sun { fill: var(--sun); } .s-t-win { fill: var(--win); }
+.s-lbl { fill: var(--ink); font-size: 13.5px; font-weight: 600; }
+.s-sub { fill: var(--muted); font-size: 12px; }
+.s-mono { fill: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
+.e-dns { stroke: var(--svc); } .e-nat { stroke: var(--svc); } .e-sso { stroke: var(--ctl); } .e-usr { stroke: var(--win); }
+.edge { fill: none; stroke-width: 2.4; }
+.edge.dash { stroke-dasharray: 7 5; }
+.m-svc { fill: var(--svc); } .m-sso { fill: var(--ctl); } .m-win { fill: var(--win); }
+.e-txt { font-size: 12.5px; font-weight: 700; }
+.e-txt.svc { fill: var(--svc); } .e-txt.sso { fill: var(--ctl); } .e-txt.win { fill: var(--win); }
+.badge { fill: var(--bg); stroke: var(--line); }
 .nets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
 .net { border: 2px dashed var(--muted); border-radius: 8px; padding: .5rem .7rem; font-size: .9rem; background: var(--surface); min-width: 0; }
 .net b { font-family: var(--font-mono); font-size: .85rem; }
@@ -112,7 +146,10 @@ header.top { display: grid; gap: .8rem; }
 
 @media (max-width: 860px) {
   .vms, .models { grid-template-columns: minmax(0, 1fr); }
+  .links { padding-top: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .link .arrow.left::before { transform: rotate(90deg); }
 }
+@media (max-width: 520px) { .links { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {
   .nets, .grid2 { grid-template-columns: minmax(0, 1fr); }
 }
@@ -187,6 +224,30 @@ a { color: var(--sun); }
         <div class="box"><b>CA du lab</b><small>« Sunbeam Lab Root CA » : signe le certificat de Keycloak. Fichier <code>ca.crt</code> distribué aux postes.</small></div>
       </div>
 
+      <!-- Liens entre les deux VM -->
+      <div class="links" aria-label="Échanges entre Lab-Sunbeam et Lab-Services">
+        <div class="link dns">
+          <div class="arrow left">DNS · 53</div>
+          <b>Résoudre les noms</b>
+          <small>La machine, les pods (CoreDNS) et les instances demandent à Lab-Services les adresses de <code>*.lab.test</code>.</small>
+        </div>
+        <div class="link nat">
+          <div class="arrow left">via 192.168.57.2</div>
+          <b>Internet des instances</b>
+          <small>Les VM d’OpenStack sortent par la passerelle NAT de Lab-Services.</small>
+        </div>
+        <div class="link sso">
+          <div class="arrow both">HTTPS · 8443</div>
+          <b>Fédération SAML</b>
+          <small>Keystone fait confiance à Keycloak (journée sécurité, démo 2).</small>
+        </div>
+        <div class="link ca">
+          <div class="arrow left">ca.crt</div>
+          <b>Confiance</b>
+          <small>La CA du lab permet de vérifier le certificat de Keycloak.</small>
+        </div>
+      </div>
+
       <!-- Lab-Sunbeam -->
       <div class="layer l-sun">
         <div class="lh">
@@ -246,6 +307,102 @@ a { color: var(--sun); }
     </div>
   </div>
   </div>
+</section>
+
+<!-- 1 bis. Les échanges entre les deux VM -->
+<section aria-labelledby="s1b">
+  <h2 id="s1b">Ce que Lab-Sunbeam demande à Lab-Services</h2>
+  <p>Les deux VM sont séparées, mais le cloud ne fonctionne pas sans Lab-Services. Lab-Sunbeam lui demande trois choses : <strong>trouver les adresses</strong> (DNS), <strong>sortir sur Internet</strong> pour les instances, et, pendant la journée sécurité, <strong>vérifier l’identité</strong> des personnes avec Keycloak.</p>
+
+  <div class="svgwrap">
+  <svg viewBox="0 0 960 500" role="img" aria-labelledby="svgt svgd">
+    <title id="svgt">Échanges entre Lab-Sunbeam, Lab-Services et le PC Windows</title>
+    <desc id="svgd">Lab-Sunbeam interroge le DNS de Lab-Services pour sa machine, ses pods et ses instances ; les instances sortent sur Internet par la passerelle de Lab-Services ; Keystone lit les métadonnées SAML de Keycloak ; le PC Windows se connecte à Horizon et à Keycloak.</desc>
+    <defs>
+      <marker id="ah-svc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-svc"/></marker>
+      <marker id="ah-sso" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-sso"/></marker>
+      <marker id="ah-win" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-win"/></marker>
+    </defs>
+
+    <!-- Lab-Sunbeam -->
+    <rect x="20" y="40" width="400" height="345" rx="12" class="s-sun"/>
+    <text x="38" y="70" class="s-title s-t-sun">Lab-Sunbeam</text>
+    <text x="402" y="70" text-anchor="end" class="s-mono">192.168.56.10</text>
+
+    <rect x="40" y="88" width="360" height="56" rx="8" class="s-in"/>
+    <text x="54" y="111" class="s-lbl">Ubuntu de la machine</text>
+    <text x="54" y="131" class="s-mono">résolveur DNS = 192.168.56.20</text>
+
+    <rect x="40" y="156" width="360" height="56" rx="8" class="s-in"/>
+    <text x="54" y="179" class="s-lbl">Kubernetes : DNS des pods (CoreDNS)</text>
+    <text x="54" y="199" class="s-mono">upstream-nameservers 192.168.56.20</text>
+
+    <rect x="40" y="224" width="360" height="56" rx="8" class="s-in"/>
+    <text x="54" y="247" class="s-lbl">Keystone + charm keystone-saml</text>
+    <text x="54" y="267" class="s-sub">lit les métadonnées SAML de Keycloak</text>
+
+    <rect x="40" y="292" width="360" height="74" rx="8" class="s-in"/>
+    <text x="54" y="315" class="s-lbl">Instances OpenStack (VM Nova)</text>
+    <text x="54" y="335" class="s-mono">réseau externe 192.168.57.0/24</text>
+    <text x="54" y="353" class="s-mono">DNS et passerelle = 192.168.57.2</text>
+
+    <!-- Lab-Services -->
+    <rect x="560" y="40" width="380" height="345" rx="12" class="s-svc"/>
+    <text x="578" y="70" class="s-title s-t-svc">Lab-Services</text>
+    <text x="922" y="70" text-anchor="end" class="s-mono">.56.20 · .57.2</text>
+
+    <rect x="580" y="96" width="340" height="104" rx="8" class="s-in"/>
+    <text x="594" y="120" class="s-lbl">dnsmasq · port 53</text>
+    <text x="594" y="141" class="s-mono">cloud.lab.test    → .201</text>
+    <text x="594" y="158" class="s-mono">internal.lab.test → .202</text>
+    <text x="594" y="175" class="s-mono">sso.lab.test      → .20</text>
+    <text x="594" y="192" class="s-sub">le reste : relayé vers Internet</text>
+
+    <rect x="580" y="224" width="340" height="56" rx="8" class="s-in"/>
+    <text x="594" y="247" class="s-lbl">Keycloak · HTTPS 8443</text>
+    <text x="594" y="267" class="s-mono">sso.lab.test · realm lab</text>
+
+    <rect x="580" y="300" width="340" height="56" rx="8" class="s-in"/>
+    <text x="594" y="323" class="s-lbl">Passerelle NAT</text>
+    <text x="594" y="343" class="s-mono">192.168.57.2 → Internet</text>
+
+    <!-- Échanges -->
+    <path d="M400,116 C490,116 490,128 578,128" class="edge e-dns" marker-end="url(#ah-svc)"/>
+    <path d="M400,184 C490,184 490,160 578,160" class="edge e-dns" marker-end="url(#ah-svc)"/>
+    <path d="M400,310 C500,300 470,196 578,190" class="edge e-dns dash" marker-end="url(#ah-svc)"/>
+    <path d="M400,348 C490,348 490,328 578,328" class="edge e-nat" marker-end="url(#ah-svc)"/>
+    <path d="M400,252 L578,252" class="edge e-sso" marker-end="url(#ah-sso)"/>
+
+    <rect x="447" y="92" width="66" height="20" rx="10" class="badge"/>
+    <text x="480" y="106" text-anchor="middle" class="e-txt svc">DNS</text>
+    <rect x="447" y="232" width="66" height="20" rx="10" class="badge"/>
+    <text x="480" y="246" text-anchor="middle" class="e-txt sso">SAML</text>
+    <rect x="440" y="356" width="80" height="20" rx="10" class="badge"/>
+    <text x="480" y="370" text-anchor="middle" class="e-txt svc">Internet</text>
+
+    <!-- PC Windows -->
+    <rect x="270" y="430" width="420" height="54" rx="10" class="s-win"/>
+    <text x="288" y="455" class="s-title s-t-win" style="font-size:18px">PC Windows</text>
+    <text x="288" y="474" class="s-sub">navigateur · SSH · noms du lab et ca.crt (Configurer-Lab-Sunbeam.ps1)</text>
+    <path d="M330,430 L330,389" class="edge e-usr" marker-end="url(#ah-win)"/>
+    <path d="M630,430 L630,389" class="edge e-usr" marker-end="url(#ah-win)"/>
+    <text x="320" y="414" text-anchor="end" class="e-txt win">Horizon, API, SSH</text>
+    <text x="640" y="414" class="e-txt win">connexion Keycloak</text>
+  </svg>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Échange</th><th>Qui demande</th><th>À quoi ça sert dans notre projet</th><th>Si Lab-Services est éteinte ou figée</th></tr></thead>
+      <tbody>
+        <tr><td class="svc">DNS</td><td>La machine Lab-Sunbeam, les pods de Kubernetes, les instances</td><td>Chaque service joint les autres par leur <strong>nom</strong> (<code>internal.lab.test</code>, <code>cloud.lab.test</code>), jamais par leur adresse. Les instances résolvent aussi les dépôts Ubuntu.</td><td>Nova, Neutron, Cinder ne trouvent plus Keystone : <code>503 … The Keystone service is temporarily unavailable</code>. C’est la panne la plus fréquente du lab</td></tr>
+        <tr><td class="svc">Internet (NAT)</td><td>Les instances, par le routeur de leur projet</td><td>Installer des paquets (<code>apt</code>, Nginx de la démo <code>1-demo-openstack</code>).</td><td>Les instances démarrent, mais <code>apt</code> et <code>cloud-init</code> échouent</td></tr>
+        <tr><td class="svc">SAML (HTTPS 8443)</td><td>Keystone (charm <code>keystone-saml</code>), et le navigateur de la personne</td><td>Fédération d’identité de la journée sécurité : le mot de passe est vérifié par Keycloak, jamais par OpenStack.</td><td>Les comptes fédérés ne peuvent plus se connecter ; les comptes locaux (<code>admin</code>, <code>demo</code>) marchent toujours</td></tr>
+        <tr><td class="svc">CA du lab</td><td>Keystone, le PC Windows</td><td>Faire confiance au certificat HTTPS de Keycloak.</td><td>Sans objet : c’est un fichier, pas un service</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">D’où la règle de démarrage : <strong>Lab-Services d’abord, Lab-Sunbeam ensuite</strong>. Et, au moindre <code>503</code> général, vérifier Lab-Services en premier : <code>getent hosts internal.lab.test</code> sur Lab-Sunbeam.</p>
 </section>
 
 <!-- 2. Les adresses -->
