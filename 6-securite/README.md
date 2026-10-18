@@ -58,7 +58,14 @@ Les démos créent des VM et modifient le cloud : elles demandent un lab **en bo
    powercfg /change standby-timeout-ac 0
    ```
 
-2. **Démarrer Lab-Services, puis Lab-Sunbeam**, dans cet ordre : Lab-Services fournit le DNS du lab et Keycloak.
+2. **Démarrer Lab-Services, puis Lab-Sunbeam**, dans cet ordre : Lab-Services fournit le DNS du lab et Keycloak. Vérifier que Lab-Services répond vraiment, depuis Lab-Sunbeam :
+
+   ```bash
+   getent hosts sso.lab.test
+   curl -s -o /dev/null -w "%{http_code}\n" -k https://sso.lab.test:8443/realms/lab
+   ```
+
+   Attendu : `192.168.56.20   sso.lab.test`, puis `200`. Constaté le 18 octobre : Lab-Services allumée mais **figée** (ping OK, SSH muet, `000` pour Keycloak). Sa console VirtualBox affichait en boucle `rcu: INFO: rcu_preempt detected expedited stalls on CPUs/tasks`, signe d’un noyau bloqué. *Machine → Réinitialiser* n’a pas suffi (le noyau a continué) ; il a fallu **Machine → Fermer → Éteindre la machine**, puis **Démarrer**. Keycloak répond environ 3 minutes après le démarrage.
 3. **Vérifier le cloud** dans Lab-Sunbeam (guide `3-sunbeam-cli/DEMOS-ENTREPRISE.md`, démo 1) :
 
    ```bash
@@ -68,8 +75,13 @@ Les démos créent des VM et modifient le cloud : elles demandent un lab **en bo
    uptime
    ```
 
-   Attendu : tous les rôles `active`, aucune ligne pour la deuxième commande, et une charge (`load average`) redescendue sous 10 environ.
-4. **Prendre un instantané** de Lab-Sunbeam et de Lab-Services dans VirtualBox (Machine → Prendre un instantané) : les démos 1 et 2 modifient durablement le cloud, la démo 3 le realm Keycloak, l’instantané garantit le retour arrière.
+   Attendu : tous les rôles `active`, aucune ligne pour la deuxième commande, et une charge (`load average`) redescendue sous 10 environ. Après un redémarrage de Lab-Sunbeam, les routeurs MySQL (`*-mysql-router`) passent en `error` tant que `mysql/0` n’est pas `active` : attendre `mysql/0 … Primary`, puis `juju resolved -m openstack <unité>` pour chacun (constaté le 18 octobre, cloud sain 12 minutes après le démarrage).
+4. **Prendre un instantané, VM éteinte** : les démos 1 et 2 modifient durablement le cloud, la démo 3 le realm Keycloak, et la démo 6 ajoute COS ; l’instantané garantit le retour arrière.
+
+   - Lab-Sunbeam : `sudo shutdown -h now` dans la VM, attendre l’état *Éteinte* dans VirtualBox, **Machine → Prendre un instantané**, puis **Démarrer**. Constaté le 18 octobre : instantané en quelques secondes.
+   - Lab-Services : même chose.
+
+   ⚠ **Pas d’instantané VM allumée.** Essayé le 18 octobre sur Lab-Services : l’instantané « à chaud » est resté bloqué à 90 % pendant des heures (état `livesnapshotting`), sans jamais être enregistré, et la VM est restée coincée dans cet état. Un instantané à chaud copie la mémoire pendant que la VM continue d’écrire : sur un PC à court de mémoire, la copie ne rattrape jamais la VM.
 
 ## Ce que les tests du 18 octobre ont révélé
 
@@ -91,6 +103,7 @@ Ces points changent la façon de jouer les démos ; chacun est expliqué dans sa
 | 5 | `openstack port list --long` n’a pas de colonne pour la sécurité de port | Audit par l’API de Neutron |
 | 6 | Keystone ne nomme pas le compte visé par un échec `401` | Compter par adresse, ou par compte dans Keycloak |
 | 6 | `observability embedded` active aussi la télémétrie, prend 75 minutes et pousse la charge jusqu’à 77 ; Loki ne reçoit pas les journaux de la machine (`nova-compute`) | L’activer avant la séance ; `journalctl` pour la machine |
+| 2 | Le guide `Guide-Sunbeam-VirtualBox-Keycloak.md` (section 12) utilise `sunbeam identity provider add`, qui échoue sur ce lab | Suivre la démo 2, étape 2.4, plutôt que le guide |
 
 ## Conventions
 

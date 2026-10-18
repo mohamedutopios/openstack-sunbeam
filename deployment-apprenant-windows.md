@@ -347,21 +347,68 @@ juju status -m openstack
 juju status -m admin/openstack-machines
 ```
 
-Le modèle des machines appartient à l’utilisateur Juju `admin` : `juju status -m openstack-machines` renvoie `model ... not found`. Toutes les applications doivent être `active` (quelques `blocked` ou `maintenance` sont normaux les premières minutes).
+Le modèle des machines appartient à l’utilisateur Juju `admin` : `juju status -m openstack-machines` renvoie `model ... not found`. À la fin, toutes les applications doivent être `active`.
 
-Au démarrage, des hooks échouent parfois tant que l’API Juju n’est pas joignable, et Juju ne les relance pas : l’unité reste en `error`. Par exemple, `keystone-mysql-router` en erreur bloque toute authentification (`HTTP 500`).
-
-```bash
-juju status -m openstack | grep -w error
-```
-
-Pour chaque unité listée :
+Pour ne voir que ce qui ne va pas :
 
 ```bash
-juju resolved -m openstack keystone-mysql-router/0
+juju status -m openstack --format short | grep -v "workload:active"
 ```
 
-Attends une minute : l’unité doit repasser `active`.
+Attendu, une fois le cloud prêt : aucune ligne.
+
+#### Juste après le démarrage : un écran plein de rouge, c’est normal
+
+Dans les 10 à 15 minutes qui suivent le démarrage de Lab-Sunbeam, on voit en général (constaté sur le lab le 18 octobre 2026) :
+
+| Unité | État | Ce que ça veut dire |
+|---|---|---|
+| `mysql/0` | `maintenance` « Starting mysqld » | **La cause** : la base de données démarre encore |
+| `*-mysql-router/0` | `error` « hook failed: "start" » ou « "update-status" » | Le routeur a essayé de joindre une base pas encore prête ; son charm a échoué une fois, et Juju attend qu’on lui dise de réessayer |
+| `neutron/0`, `nova/0`, `placement/0` | `blocked` « (container:…) healthcheck failed: online » | Pebble, le gestionnaire de processus du conteneur, vérifie que le service répond ; sans base de données, il ne répond pas |
+
+Tout dépend de la base : les services dépendent des routeurs, qui dépendent de `mysql`. On répare **de bas en haut** :
+
+**1. Attendre que MySQL soit prêt.** Relancer la commande toutes les 30 secondes, jusqu’à lire `active` et `Primary` :
+
+```bash
+juju status -m openstack mysql
+```
+
+**2. Relancer les unités en `error`.** Une unité en `error` ne réessaie jamais seule : `juju resolved` relance l’étape qui a échoué. Pour toutes d’un coup :
+
+```bash
+for u in $(juju status -m openstack --format short | grep "workload:error" | sed "s/^- \([^:]*\):.*/\1/"); do echo "$u"; juju resolved -m openstack "$u"; done
+```
+
+Ou une par une, par exemple : `juju resolved -m openstack keystone-mysql-router/0`. Un `keystone-mysql-router` resté en erreur bloque toute authentification (`HTTP 500`).
+
+**3. Attendre les `blocked`.** Neutron, Nova et Placement repassent `active` seuls, 1 à 3 minutes après le retour de la base : Pebble refait son test régulièrement. Pour suivre :
+
+```bash
+watch -n 15 "juju status -m openstack --format short | grep -v workload:active"
+```
+
+`Ctrl+C` pour quitter `watch` quand l’écran est vide.
+
+#### Si une unité reste en défaut : creuser
+
+Exemple avec `nova/0` ; remplacer par l’unité concernée.
+
+| Question | Commande |
+|---|---|
+| Quand a-t-elle changé d’état, et pourquoi ? | `juju show-status-log -m openstack nova/0` |
+| Quelle est l’erreur exacte de son charm (« hook failed ») ? | `juju debug-log -m openstack --replay --no-tail --include nova/0 \| tail -30` |
+| Quel test de Pebble échoue ? | `sudo k8s kubectl -n openstack exec nova-0 -c nova-api -- /charm/bin/pebble checks` |
+| Que dit le service lui-même ? | `sudo k8s kubectl -n openstack logs nova-0 -c nova-api --tail=30` |
+
+Le nom du conteneur (`nova-api`) se lit dans le message `(container:nova-api)` de `juju status`. La fiche `4-juju-cli/DEPANNAGE-SERVICES.md` reprend cette démarche service par service (Keystone, MySQL, Glance, Nova, Neutron, Cinder, Ceph, accès). Le guide `4-juju-cli/DEMOS-PANNES.md` la met en pratique, avec une panne Pebble provoquée puis corrigée (partie 5).
+
+**Quand s’inquiéter :**
+
+- `mysql/0` reste en `maintenance` plus de 20 minutes : lire `juju debug-log -m openstack --replay --no-tail --include mysql/0 | tail -30` ;
+- une unité repasse en `error` juste après `juju resolved` : la cause n’est pas la base ; lire son `debug-log` ;
+- tout reste figé, charge très élevée (`uptime`) : vérifier l’hyperviseur Windows (étape 2) et la virtualisation imbriquée (étape 7).
 
 ### 10.2 Ceph
 
@@ -518,6 +565,8 @@ Après la première validation complète, crée un snapshot des **deux VM étein
 | `mgmt0` ou `provider0` absente, IP manquantes | MAC non conservées à l’import, ou carte sur le mauvais adaptateur | 5 et 6 |
 | Horizon 503 ou ne répond pas juste après le démarrage | Services encore en cours de démarrage | Attendre 10 à 15 min |
 | `openstack ...` : `HTTP 500` sur l’authentification | Unité `keystone-mysql-router` en erreur | 10.1 |
+| `juju status` : `mysql/0` en `maintenance`, routeurs `*-mysql-router` en `error`, `nova`, `neutron`, `placement` en `blocked` « healthcheck failed » | Démarrage : la base de données n’est pas encore prête | 10.1 (attendre `mysql`, puis `juju resolved`) |
+| Une unité reste en `error` ou `blocked` | À diagnostiquer | 10.1 (« Si une unité reste en défaut ») |
 | Lancement d’instance : `ERROR`, `HTTP 502` Glance dans les logs Nova | OSD Ceph arrêté | 10.2 |
 | Volume en `error`, `cinder-volume` `down` dans `openstack volume service list` | Charms `microceph` et `cinder-volume` figés au démarrage | 10.2 (service des volumes) |
 | Instance `ACTIVE` sans ping ni SSH, `Kernel panic` dans sa console | EPT actif | 10.3 |
