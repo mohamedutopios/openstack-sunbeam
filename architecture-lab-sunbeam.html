@@ -187,7 +187,7 @@ a { color: var(--sun); }
 <!-- 1. Le schéma -->
 <section aria-labelledby="s1">
   <h2 id="s1">Vue d’ensemble</h2>
-  <p>Chaque cadre en contient d’autres : ton PC héberge deux VM ; dans Lab-Sunbeam, un Kubernetes fait tourner OpenStack ; Juju range le tout en trois <em>modèles</em>. La couleur d’un cadre est reprise dans les tableaux plus bas.</p>
+  <p>Chaque cadre en contient d’autres : le PC de l’apprenant héberge deux VM ; dans Lab-Sunbeam, un Kubernetes fait tourner OpenStack ; Juju range le tout en trois <em>modèles</em>. La couleur d’un cadre est reprise dans les tableaux plus bas.</p>
   <div class="legend" aria-hidden="true">
     <span style="color:var(--win)"><i></i>PC Windows</span>
     <span style="color:var(--svc)"><i></i>Lab-Services</span>
@@ -202,7 +202,7 @@ a { color: var(--sun); }
     <div class="lh">
       <span class="name">PC Windows · VirtualBox</span>
       <span class="meta">192.168.56.1 · 192.168.57.1</span>
-      <span class="what">Ton poste : navigateur (Horizon, Keycloak), SSH vers les VM et les instances. Il est branché sur les deux réseaux du lab.</span>
+      <span class="what">Le poste de l’apprenant : navigateur (Horizon, Keycloak), SSH vers les VM et les instances. Il est branché sur les deux réseaux du lab.</span>
     </div>
 
     <div class="nets">
@@ -434,7 +434,7 @@ a { color: var(--sun); }
       <tbody>
         <tr class="group l-ops"><td colspan="4">Les services d’OpenStack</td></tr>
         <tr><td class="svc">Keystone</td><td><span class="tag l-ops">openstack</span></td><td>L’<strong>identité</strong> : comptes, domaines, projets, rôles, catalogue des adresses. Délivre et valide les jetons que présentent tous les autres appels.</td><td>Plus rien ne marche : <code>401</code>, <code>500</code> ou <code>503</code> partout</td></tr>
-        <tr><td class="svc">Horizon</td><td><span class="tag l-ops">openstack</span></td><td>L’<strong>interface web</strong>. Elle n’a pas de données : elle appelle les API des autres services avec ton jeton.</td><td>Le web est perdu, la ligne de commande marche encore</td></tr>
+        <tr><td class="svc">Horizon</td><td><span class="tag l-ops">openstack</span></td><td>L’<strong>interface web</strong>. Elle n’a pas de données : elle appelle les API des autres services avec le jeton de l’utilisateur connecté.</td><td>Le web est perdu, la ligne de commande marche encore</td></tr>
         <tr><td class="svc">Glance</td><td><span class="tag l-ops">openstack</span></td><td>Le catalogue des <strong>images</strong> de VM (ici <code>ubuntu</code>), stockées dans Ceph.</td><td>Plus de création de VM (<code>502</code> dans Nova)</td></tr>
         <tr><td class="svc">Nova</td><td><span class="tag l-ops">openstack</span></td><td>Les <strong>instances</strong>. Le pod contient <code>nova-api</code> (reçoit les demandes), <code>nova-scheduler</code> (choisit l’hyperviseur), <code>nova-conductor</code> (accès à la base).</td><td>Plus de gestion des VM ; celles qui tournent continuent</td></tr>
         <tr><td class="svc">Placement</td><td><span class="tag l-ops">openstack</span></td><td>L’<strong>inventaire des capacités</strong> (vCPU, RAM, disque) de chaque hyperviseur. Le scheduler de Nova le consulte avant de placer une VM.</td><td>Plus aucune VM ne se crée</td></tr>
@@ -521,7 +521,6 @@ a { color: var(--sun); }
     <li><strong>Les services</strong> retrouvent leur base : leurs tests de santé repassent au vert, et <code>blocked</code> devient <code>active</code>.</li>
     <li>Compter <strong>10 à 15 minutes</strong> avant un cloud sain.</li>
   </ol>
-  <p class="note">Pour diagnostiquer une panne, couche par couche : fiche <code>4-juju-cli/DEPANNAGE-SERVICES.md</code>. Pour vérifier le lab après installation : section 10 de <code>deployment-apprenant-windows.md</code>.</p>
 </section>
 
 </div>
