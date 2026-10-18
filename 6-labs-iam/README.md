@@ -81,7 +81,7 @@ ssh vagrant@192.168.56.10
 Copie d’abord ce dossier depuis Windows (PowerShell, dans le dossier du dépôt) :
 
 ```powershell
-scp -r .\labs-iam vagrant@192.168.56.10:~/
+scp -r .\6-labs-iam vagrant@192.168.56.10:~/labs-iam
 ```
 
 ## Préparer la session : `lab-env.sh`

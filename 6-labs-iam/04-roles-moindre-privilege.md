@@ -293,7 +293,7 @@ APPCRED_SECRET=$(python3 -c "import json; print(json.load(open('/tmp/appcred.jso
 
 ✅ **Observé** (18 octobre 2026) : `<id> reader 2026-11-17T18:41:02.000000 False` : un identifiant, le rôle `reader` seul, une expiration à 30 jours, `unrestricted = False`. ⚠ **Piège :** le **secret** n’est affiché qu’une fois, à la création ; Keystone n’en garde qu’une empreinte.
 
-⚠ **Piège : un identifiant d’application ne reçoit que les rôles nommés à sa création.** Les rôles **impliqués** ne suivent pas. Constaté sur le lab le 18 octobre 2026 (`6-securite/04-rotation-secrets.md`, § 4.7) : bien que `member` implique `reader` (`openstack implied role list`), un identifiant créé avec `--role member` seul ne voyait pas les réseaux du projet ; avec `--role member --role reader`, il les voyait. Ici, on nomme `reader` explicitement : le script lit sans problème. Pour un script qui doit aussi créer, nommer **les deux** rôles.
+⚠ **Piège : un identifiant d’application ne reçoit que les rôles nommés à sa création.** Les rôles **impliqués** ne suivent pas. Constaté sur le lab le 18 octobre 2026 (`7-securite/04-rotation-secrets.md`, § 4.7) : bien que `member` implique `reader` (`openstack implied role list`), un identifiant créé avec `--role member` seul ne voyait pas les réseaux du projet ; avec `--role member --role reader`, il les voyait. Ici, on nomme `reader` explicitement : le script lit sans problème. Pour un script qui doit aussi créer, nommer **les deux** rôles.
 
 Le script utilise l’identifiant d’application :
 
