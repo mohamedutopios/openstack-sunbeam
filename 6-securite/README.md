@@ -2,7 +2,7 @@
 
 Ce dossier accompagne la journée **sécurité** de la formation. Les supports théoriques sont `support/11-openstack-authentification-externe-mots-de-passe-v1.0.html` et `support/13-openstack-micro-segmentation-audit-v1.0.html` ; ici, on **fait**, pas à pas, sur le lab.
 
-> **Statut : rejoué sur le lab le 18 octobre 2026**, démos 1 à 6, retours arrière compris. Chaque fichier précise ce qui n’a pas été joué : l’import de la CA dans Windows (démo 1), l’affichage dans le navigateur (démo 2), le second facteur de Keystone, impossible sur ce lab (démo 3), `regenerate-password` sur `admin` (démo 4), la centralisation des journaux (démo 6, 6.5). Les sorties citées sont celles de ce jour : les identifiants et adresses changent d’une installation à l’autre.
+> **Statut : rejoué sur le lab le 18 octobre 2026**, démos 1 à 6, retours arrière compris. Chaque fichier précise ce qui n’a pas été joué : l’import de la CA dans Windows (démo 1), l’affichage dans le navigateur (démo 2), le second facteur de Keystone, impossible sur ce lab (démo 3), `regenerate-password` sur `admin` (démo 4). La centralisation des journaux (démo 6, 6.5) est jouée : elle prend 75 minutes et charge fortement le lab ; son retrait n’a pas été joué. Les sorties citées sont celles de ce jour : les identifiants et adresses changent d’une installation à l’autre.
 
 ## Objectifs de la journée
 
@@ -90,6 +90,7 @@ Ces points changent la façon de jouer les démos ; chacun est expliqué dans sa
 | 4 | Un identifiant d’application ne reçoit que les rôles nommés (`member` sans `reader` ne voit pas les réseaux du projet) | `--role member --role reader` |
 | 5 | `openstack port list --long` n’a pas de colonne pour la sécurité de port | Audit par l’API de Neutron |
 | 6 | Keystone ne nomme pas le compte visé par un échec `401` | Compter par adresse, ou par compte dans Keycloak |
+| 6 | `observability embedded` active aussi la télémétrie, prend 75 minutes et pousse la charge jusqu’à 77 ; Loki ne reçoit pas les journaux de la machine (`nova-compute`) | L’activer avant la séance ; `journalctl` pour la machine |
 
 ## Conventions
 

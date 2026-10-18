@@ -1,6 +1,6 @@
 # Démo 6 : audit et traçabilité
 
-> **Statut : 6.1 à 6.4 rejouées sur le lab le 18 octobre 2026** ; les sorties citées sont celles de ce jour. La centralisation (6.5) n’a **pas** été activée : elle ajoute une pile lourde (Loki, Prometheus, Grafana) à un lab déjà à la limite de sa mémoire. Support : module 13.
+> **Statut : rejouée sur le lab le 18 octobre 2026**, centralisation COS comprise (6.5, 75 minutes d’activation). Les sorties citées sont celles de ce jour. Non joué : le retrait de COS (`sunbeam disable observability embedded`). Support : module 13.
 
 ## Objectif
 
@@ -226,48 +226,174 @@ openstack server delete lab-sec-victime --wait
 
 ✅ **Conclusion** (18 octobre) : « la VM `lab-sec-victime` a été supprimée par `demo` (domaine `users`) le 18 octobre à 10:40:43, par la requête `req-9d4e7e12…` ; `nova-compute` l’a détruite sur l’hôte `sunbeam`, et Nova a supprimé son port dans Neutron sous le même identifiant global ».
 
-## 6.5 Centraliser les journaux
+## 6.5 Centraliser les journaux avec COS (Loki, Prometheus, Grafana)
 
 **Le problème :** les journaux vivent dans chaque pod et sur chaque machine. Ils **disparaissent** avec un pod recréé, et l’enquête de 6.4 demande une commande par service. En entreprise, on les **centralise** : un seul endroit, une conservation maîtrisée, des recherches et des alertes.
 
-Sunbeam propose la fonctionnalité `observability` :
+Sunbeam propose la fonctionnalité `observability`, qui s’appuie sur la pile d’observabilité de Canonical, **COS** (*Canonical Observability Stack*) :
 
 | Variante | Effet |
 |---|---|
-| `observability.embedded` | Déploie, dans le cloud lui-même, une pile d’observabilité de Canonical (COS) : **Loki** (journaux), Prometheus (métriques), **Grafana** (consultation) |
+| `observability.embedded` | Déploie COS **dans le cloud lui-même**, dans un modèle Juju à part, `observability` |
 | `observability.external` | Envoie journaux et métriques vers une pile COS **déjà existante** |
 
-⚠ **Ressources :** la variante `embedded` ajoute plusieurs applications au cloud. Sur le lab, dont le PC n’avait plus que 0,6 Go de mémoire libre le 17 octobre, elle risque de le déstabiliser. À tester d’abord sur un instantané, ou à présenter en démonstration commentée.
+| Composant de COS | Rôle |
+|---|---|
+| **Loki** | Stocke les **journaux** et permet de les chercher (langage LogQL) |
+| **Prometheus** | Stocke les **métriques** (charge, mémoire, nombre de requêtes…) |
+| **Grafana** | L’interface web : recherche, tableaux de bord |
+| **Alertmanager** | Envoie les alertes (courriel, messagerie) |
+| Catalogue, Traefik | La page d’accueil de la pile et son répartiteur, qui lui donne une adresse |
 
-### Activer (⚠ non testé sur le lab)
+### Avant d’activer : un lab en bon état et un instantané
 
 ```bash
-sunbeam enable observability embedded --help
-sunbeam enable observability embedded
-sunbeam list-features | grep observability
-juju models
+uptime
+free -g
+juju status -m openstack --format short | grep -v "workload:active"
 ```
 
-✅ **Attendu :** la fonctionnalité cochée, et un modèle Juju supplémentaire pour la pile d’observabilité (⚠ **à vérifier** : son nom exact dans `juju models`).
+Sur le lab, le 18 octobre : charge à 3, **10 Go** de mémoire disponibles dans la VM, aucune unité en défaut, et un instantané VirtualBox de Lab-Sunbeam (README, « Avant la séance »). L’activation est **longue** et **lourde** : la lancer avant la séance, pas devant les apprenants.
 
-Adresse de Grafana et mot de passe d’administration :
+### Activer
+
+```bash
+time sunbeam enable observability embedded
+```
+
+✅ **Attendu** (18 octobre) :
+
+```text
+OpenStack telemetry application enabled.
+Observability enabled.
+real	75m45.203s
+```
+
+**Ce que fait la commande, dans l’ordre** (lu dans son journal, `~/snap/openstack/common/logs/`, lignes `Running step`) :
+
+| Étape | Durée constatée | Ce qui est ajouté |
+|---|---|---|
+| `Enable OpenStack telemetry` | 17 min | La **télémétrie**, dont l’observabilité dépend : Aodh, Ceilometer, Gnocchi et `openstack-exporter` dans le modèle `openstack` (de 25 à 31 unités) |
+| `Deploy Observability Stack` | 12 min | Le modèle `observability` : `alertmanager`, `catalogue`, `grafana`, `loki`, `prometheus`, `traefik` |
+| `Enable OpenStack Observability Embedded` | 48 min | Un collecteur (`opentelemetry-collector`) relié à chaque service OpenStack, puis installé sur la machine (avec `node-exporter`), et le charm `hardware-observer` |
+
+**À surveiller pendant ce temps** (dans une seconde session) : la charge est montée jusqu’à **77**, la mémoire disponible est descendue de 10 à 7 Go. Le cloud est resté utilisable.
+
+```bash
+juju models
+juju status -m observability
+sunbeam list-features | grep -E "telemetry|observ"
+```
+
+✅ **Attendu** (18 octobre) : un modèle `observability` avec six applications `active` ; `telemetry` et `observability.embedded` cochés (`X`).
+
+Une seule unité reste `blocked` : `hardware-observer/0`, avec `Missing relation: [cos-agent]`. Ce charm surveille le matériel physique (disques, ventilateurs, contrôleurs) : sans objet dans une VM. Sans conséquence pour la démo.
+
+### Se connecter à Grafana
+
+Les sous-commandes de la fonctionnalité n’apparaissent qu’une fois celle-ci activée : `sunbeam observability --help` répondait `No such command 'observability'` pendant l’activation.
 
 ```bash
 sunbeam observability dashboard-url
-juju run --model <modele d observabilite> grafana/leader get-admin-password
+umask 077
+juju run -m observability grafana/leader get-admin-password --format json \
+  | python3 -c 'import sys,json; print(list(json.load(sys.stdin).values())[0]["results"]["admin-password"])' > ~/lab-sec-grafana.pw
 ```
+
+✅ **Attendu** (18 octobre) : `http://192.168.56.205/observability-grafana`, et le mot de passe dans `~/lab-sec-grafana.pw` (droits `600`), sans l’afficher à l’écran. L’adresse `192.168.56.205` est celle du Traefik de COS, distincte de celles du cloud (`.201`, `.202`).
+
+Dans le navigateur de Windows : cette adresse, compte `admin`, le mot de passe du fichier (`cat ~/lab-sec-grafana.pw`, hors écran projeté). Puis **Explore** (menu de gauche) → source de données **Loki**.
+
+⚠ L’accès à Grafana est en **HTTP** : le TLS de la démo 1 ne couvre pas la pile COS. En production, la placer derrière TLS, et changer le mot de passe initial.
+
+### Les étiquettes : comment Loki range les journaux
+
+Chaque ligne de journal arrive dans Loki avec des **étiquettes** (*labels*), posées par le collecteur. On les lit aussi en ligne de commande, par l’API de Loki :
+
+```bash
+L=http://192.168.56.205/observability-loki-0/loki/api/v1
+curl -s $L/labels
+curl -s $L/label/juju_application/values
+```
+
+✅ **Attendu** (18 octobre) :
+
+```text
+{"status":"success","data":["application","charm_name","juju_application","juju_hook_name","juju_model","juju_model_uuid","juju_unit","logger","model","model_uuid","pebble_service","service_name","severity","unit"]}
+{"status":"success","data":["aodh","ceilometer","cinder","glance","gnocchi","horizon","keystone","neutron","nova","openstack-exporter","ovn-central","ovn-relay","placement"]}
+```
+
+| Étiquette | Exemple | Sert à |
+|---|---|---|
+| `juju_model` | `openstack` | Le modèle Juju : seul `openstack` envoie des journaux sur le lab |
+| `juju_application` | `keystone`, `nova` | Le service |
+| `pebble_service` | `wsgi-keystone`, `neutron-server`, `wsgi-nova-api` | Le processus précis dans le pod |
+| `severity` | | Le niveau du message |
+
+⚠ Ce que Loki **ne** reçoit **pas** sur ce lab : les journaux de la machine elle-même (`nova-compute` et les autres snaps de 6.1), absents des étiquettes (`juju_model` ne contient que `openstack`). Ceux-là restent à lire avec `journalctl`.
 
 ### Chercher dans Loki
 
-Dans Grafana : **Explore** → source **Loki**. Requêtes en LogQL (⚠ **à vérifier** : les noms d’étiquettes réellement posées par l’agent de collecte, à lire dans la liste des étiquettes de l’explorateur) :
+Dans Grafana, **Explore** → **Loki**, mode *Code*, une requête LogQL. Le même texte fonctionne avec `curl`, ce qui permet de vérifier sans navigateur :
 
-| But | Requête LogQL |
-|---|---|
-| Toutes les lignes d’une requête, tous services confondus | `{juju_model="openstack"} \|= "req-…"` |
-| Les refus d’autorisation de Keystone | `{juju_model="openstack", juju_application="keystone"} \|= "ForbiddenAction"` |
-| Les suppressions de VM | `{juju_model="openstack", juju_application="nova"} \|= "DELETE /openstack-nova"` |
+```bash
+q() { curl -s -G "$L/query_range" --data-urlencode "query=$1" --data-urlencode "since=1h" --data-urlencode "limit=200" \
+  | python3 -c '
+import sys, json
+rows = sorted((ts, s["stream"].get("juju_application"), line) for s in json.load(sys.stdin)["data"]["result"] for ts, line in s["values"])
+print(len(rows), "lignes")
+for ts, app, line in rows[:12]: print(" ", app, "|", line[:140])'; }
+```
 
-**Comment le lire :** l’enquête de 6.4, qui demandait une commande par pod, se fait en **une** recherche, et reste possible même après la recréation d’un pod.
+**La fonction `q`, mot par mot :** `curl -G … --data-urlencode` envoie la requête LogQL à l’API `query_range` de Loki, sur la dernière heure (`since=1h`) ; le programme Python trie les lignes par heure et affiche le service et le début de chaque ligne.
+
+**1. L’enquête de 6.4 en une seule requête.** Rejouer la préparation de 6.4 (créer puis supprimer `lab-sec-victime`), relever le `REQ` de la suppression (6.4, étape 2), puis :
+
+```bash
+q "{juju_model=\"openstack\"} |= \"$REQ\""
+```
+
+✅ **Attendu** (18 octobre, 15 lignes) :
+
+```text
+15 lignes
+  nova | … INFO oslo.messaging.notification.audit.http.request [None req-da0d4f56-… 18e26245…
+  nova | … INFO nova.api.openstack.requestlog [None req-da0d4f56-… 18e26245…
+  neutron | … INFO neutron.wsgi [req-da0d4f56-… req-10421890-… 18e26245…
+  neutron | … INFO oslo.messaging.notification.audit.http.response [req-da0d4f56-… req-af2e32f5-…
+  placement | … INFO placement.requestlog [req-da0d4f56-… req-1138ff55-…
+```
+
+**Comment le lire :** `{juju_model="openstack"}` choisit **tous** les journaux du cloud ; `|= "…"` garde les lignes qui contiennent l’identifiant. En une requête : l’ordre reçu par Nova, la suppression du port dans Neutron et la mise à jour des ressources dans Placement, tous sous le même identifiant global. Ce qui demandait une commande par pod en 6.4.
+
+**2. Les refus d’autorisation de Keystone.** Provoquer un refus (`source ~/demo-openrc; openstack user list`), attendre une trentaine de secondes (le temps que la ligne arrive dans Loki), puis :
+
+```bash
+q '{juju_model="openstack", juju_application="keystone"} |= "ForbiddenAction"'
+```
+
+✅ **Attendu** (18 octobre) : les lignes `ERROR keystone.server.flask.application … ForbiddenAction: You are not authorized to perform the requested action: identity:list_users.`, dont une qui porte le préfixe `[None req-… <user_id> …]` : le **qui**.
+
+**3. Les suppressions de VM.**
+
+```bash
+q '{juju_model="openstack", juju_application="nova"} |= "DELETE /openstack-nova"'
+```
+
+✅ **Attendu** (18 octobre) : la ligne d’accès `"DELETE /openstack-nova/v2.1/servers/cdfdec46-… HTTP/1.1" 204` et la ligne `nova.api.openstack.requestlog` correspondante.
+
+**4. Compter, pour alerter : les échecs de connexion par adresse.** Provoquer six échecs (`for i in 1 2 3 4 5 6; do OS_PASSWORD=faux openstack token issue; done`), puis une requête qui **compte** au lieu de lister :
+
+```bash
+curl -s -G "$L/query" --data-urlencode 'query=sum by (ip) (count_over_time({juju_application="keystone"} |= "POST /openstack-keystone/v3/auth/tokens" |= "\" 401 " | regexp "^(?P<ip>[0-9.]+) " [5m]))' \
+  | python3 -c 'import sys,json; [print(s["metric"], s["value"][1]) for s in json.load(sys.stdin)["data"]["result"]]'
+```
+
+✅ **Attendu** (18 octobre) : `{'ip': '10.1.0.196'} 6`.
+
+**La requête, mot par mot :** les lignes d’accès de Keystone (`POST …/auth/tokens`) terminées en `401` ; `regexp` extrait l’adresse en début de ligne dans une étiquette `ip` ; `count_over_time(…[5m])` compte sur 5 minutes ; `sum by (ip)` additionne par adresse. C’est exactement le signal de la première alerte de 6.6 : une règle Loki qui la déclenche au-delà de 5.
+
+**Comment le lire :** l’enquête de 6.4, qui demandait une commande par pod, se fait en **une** recherche ; les journaux sont gardés hors des pods, et on peut **compter** pour alerter.
 
 ## 6.6 Exploiter : alertes et conservation
 
@@ -292,7 +418,9 @@ source ~/demo-openrc
 openstack network delete lab-sec-trace
 ```
 
-La VM `lab-sec-victime` est déjà supprimée. Si la centralisation a été activée et qu’on veut revenir en arrière : `sunbeam disable observability embedded` (⚠ à vérifier), ou restauration de l’instantané.
+La VM `lab-sec-victime` est déjà supprimée. `rm -f ~/lab-sec-grafana.pw`.
+
+Retirer COS : `sunbeam disable observability embedded` (⚠ non joué sur le lab ; la télémétrie, activée avec elle, reste à retirer à part : `sunbeam disable telemetry`). Le plus sûr reste la restauration de l’instantané pris avant l’activation.
 
 ## À retenir
 
