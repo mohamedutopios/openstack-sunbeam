@@ -306,7 +306,7 @@ $K exec keystone-0 -c keystone -- sh -c 'awk "/^\[/{p=(\$0==\"[token]\" || \$0==
 
 **La commande, mot par mot :** `awk` lit le fichier ligne par ligne ; à chaque titre de section (`[…]`), il note si c’est `[token]` ou `[fernet_tokens]` ; il n’affiche que les lignes non vides (`NF`) de ces deux sections. `ls -l` liste les clés. (Un simple `grep -A6 "^\[token\]"` afficherait aussi le début des sections voisines.)
 
-✅ **Observé** (17 octobre ; le 18, après une rotation, les clés étaient `0`, `8`, `9`, `10` : les numéros changent chaque jour, voir `6-securite/04-rotation-secrets.md`, § 4.3) :
+✅ **Observé** (17 octobre ; le 18, après une rotation, les clés étaient `0`, `8`, `9`, `10` : les numéros changent chaque jour, voir `7-securite/04-rotation-secrets.md`, § 4.3) :
 
 ```text
 [token]

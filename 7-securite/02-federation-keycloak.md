@@ -326,7 +326,7 @@ Prérequis : la CA de Sunbeam importée sur Windows (démo 1, étape 1.3).
 
 ### En ligne de commande, sans navigateur
 
-Le script `6-securite/outils/test-sso-saml.py` du dépôt joue le même trajet qu’un navigateur. Le copier sur Lab-Sunbeam (`scp .\6-securite\outils\test-sso-saml.py vagrant@192.168.56.10:~/` depuis Windows), puis :
+Le script `7-securite/outils/test-sso-saml.py` du dépôt joue le même trajet qu’un navigateur. Le copier sur Lab-Sunbeam (`scp .\7-securite\outils\test-sso-saml.py vagrant@192.168.56.10:~/` depuis Windows), puis :
 
 ```bash
 source ~/admin-openrc

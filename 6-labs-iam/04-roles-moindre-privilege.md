@@ -1,6 +1,6 @@
 # TP 4 : rôles et moindre privilège
 
-> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab le 18 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats « Observé » sont ceux de ce jour. Corrections : la matrice désigne `acme-prod` par son identifiant pour les quotas et vérifie réellement l’affectation de rôle (le client ne signale pas un `role add` refusé) ; l’inventaire des identifiants d’application passe par l’API. Limite constatée : les règles d’accès (§ 4.5.3) sont refusées par tous les services sur ce lab. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 12, rôles et moindre privilège.
 **Durée :** 2 h 30.
@@ -109,20 +109,44 @@ EOF
 bash ~/labs-iam/matrice.sh
 ```
 
-⚖ **dépend des politiques.** Deux attendus : celui du modèle Secure RBAC complet, et celui de **ce lab**, déduit des règles lues au TP 1 (§ 1.6.2). « À relever » : la règle n’a pas été lue ; c’est la matrice qui répond.
+✅ **Observé** (18 octobre 2026) :
+
+```text
+Operation                                     reader      member      manager
+Lister les instances                          david    ✅  emma     ✅  bruno    ✅
+Lister les reseaux                            david    ✅  emma     ✅  bruno    ✅
+Creer un reseau prive                         david    ⛔  emma     ✅  bruno    ✅
+Creer un groupe de securite                   david    ⛔  emma     ✅  bruno    ✅
+Creer un volume de 1 Go                       david    ✅  emma     ✅  bruno    ✅
+Creer un reseau partage                       david    ⛔  emma     ⛔  bruno    ⛔
+Lister les affectations du projet             david    ⛔  emma     ⛔  bruno    ⛔
+Donner reader a chloe sur le projet           david    ⛔  emma     ⛔  bruno    ⛔
+Modifier les quotas du projet                 david    ⛔  emma     ⛔  bruno    ⛔
+Lister les hyperviseurs                       david    ⛔  emma     ⛔  bruno    ⛔
+Creer une image publique                      david    ⛔  emma     ⛔  bruno    ⛔
+```
+
+⚖ **dépend des politiques.** Comparaison avec le modèle Secure RBAC complet :
 
 | Opération | Secure RBAC : reader | member | manager | **Ce lab** : reader | member | manager |
 |---|---|---|---|---|---|---|
-| Lister les instances, les réseaux | ✅ | ✅ | ✅ | à relever | ✅ | ✅ |
-| Créer un réseau privé | ⛔ | ✅ | ✅ | ⛔ | ✅ | ✅ |
-| Créer un groupe de sécurité, un volume | ⛔ | ✅ | ✅ | à relever | ✅ | ✅ |
+| Lister les instances, les réseaux | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Créer un réseau privé, un groupe de sécurité | ⛔ | ✅ | ✅ | ⛔ | ✅ | ✅ |
+| Créer un volume | ⛔ | ✅ | ✅ | **✅** | ✅ | ✅ |
 | Créer un réseau partagé | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
-| Lister les affectations du projet | ⛔ | ⛔ | ✅ | à relever | à relever | à relever |
-| Donner `reader` à un autre compte sur le projet | ⛔ | ⛔ | ✅ | ⛔ | ⛔ | ⛔ |
+| Lister les affectations du projet | ⛔ | ⛔ | ✅ | ⛔ | ⛔ | **⛔** |
+| Donner `reader` à un autre compte sur le projet | ⛔ | ⛔ | ✅ | ⛔ | ⛔ | **⛔** |
 | Modifier les quotas | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
 | Lister les hyperviseurs, créer une image publique | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ | ⛔ |
 
-Justifications pour ce lab : `create_network` exige `member` du projet ; `create_network:shared` et `os-hypervisors:list` exigent l’administrateur ; `identity:create_grant` exige `admin` (d’où le refus pour `manager`, contrairement au modèle).
+**Les écarts, en gras :**
+
+- un simple **`reader` crée un volume** : Cinder applique encore ses anciennes règles, où tout rôle sur le projet suffit (c’est la question 2 ci-dessous) ;
+- **`manager` ne fait rien de plus que `member`** : il ne lit pas les affectations, ne donne aucun rôle. Keystone exige `admin` pour `identity:create_grant` (TP 1, § 1.6.2).
+
+Neutron, lui, applique déjà les nouvelles règles : `create_network` exige `member` du projet, d’où le refus pour `reader`.
+
+⚠ **Pourquoi la ligne « Donner reader » vérifie l’affectation au lieu du code de retour :** un `openstack role add` refusé n’affiche rien et sort avec le code `0` (client 7.5.0, constaté le 18 octobre ; TP 2, § 2.4). Une première version de la matrice affichait donc ✅ pour les trois profils, alors qu’aucune affectation n’avait été créée.
 
 ❓ **Questions :**
 
@@ -147,7 +171,9 @@ openstack role assignment list --user david --user-domain acme --project acme-de
 os_as david acme projet acme-dev acme -- token issue -c expires
 ```
 
-✅ **Attendu :** la liste effective montre `lab-auditeur-securite` **et** `reader` ; dans le jeton, les deux rôles sont présents, et les services n’appliquent que `reader`, le seul qu’ils connaissent.
+✅ **Observé** (18 octobre 2026) : la liste effective montre `lab-auditeur-securite` **et** `reader` ; le jeton de David contient les deux rôles (`['lab-auditeur-securite', 'reader']`, lu en validant le jeton par l’API, TP 1, § 1.4.4). Les services n’appliquent que `reader`, le seul qu’ils connaissent.
+
+Ici, `implied role create` fonctionne : `lab-auditeur-securite` est un rôle **global**. Pour un rôle propre à un domaine, le client échoue (TP 2, § 2.2).
 
 ⚠ **Piège :** un rôle personnalisé **sans** implication ne donne aucun droit ; avec une implication vers `admin`, il en donne trop. Avant de créer un rôle, vérifier qu’un rôle standard ne suffit pas.
 
@@ -196,14 +222,14 @@ os_as lab-supervision admin_domain systeme -- hypervisor list
 os_as lab-supervision admin_domain systeme -- project create lab-interdit --domain acme
 ```
 
-✅ **Attendu sur ce lab** (déduit des règles du TP 1 ; à confirmer) :
+✅ **Observé** (18 octobre 2026) :
 
 | Commande | Résultat | Règle |
 |---|---|---|
 | `token issue` (portée système) | ✅ jeton avec `system` | Le compte a un rôle sur le système : il peut en obtenir la portée |
 | `project list`, `user list --domain acme` | ✅ | `list_projects` et `list_users` acceptent `reader` sur le système |
-| `hypervisor list` | ⛔ `403` | `os-hypervisors:list` = `rule:context_is_admin` : Nova n’a pas de règle de lecture système sur ce lab |
-| `project create lab-interdit` | ⛔ `403` | `create_project` exige `admin` |
+| `hypervisor list` | ⛔ `403 … Policy doesn't allow os_compute_api:os-hypervisors:list-detail to be performed.` | `os-hypervisors:list` = `rule:context_is_admin` : Nova n’a pas de règle de lecture système sur ce lab |
+| `project create lab-interdit` | ⛔ `403 … identity:create_project` | `create_project` exige `admin` |
 
 Le compte de supervision lit bien l’**identité** de toute la plateforme, mais pas l’infrastructure de Nova : sur ce lab, Keystone connaît le lecteur système, Nova non.
 
@@ -213,13 +239,13 @@ Le même compte n’a **aucun** rôle de projet : il ne peut pas obtenir de jeto
 os_as lab-supervision admin_domain projet acme-prod acme -- server list
 ```
 
-⛔ **Refus attendu (401).** ❓ **Question :** pourquoi ne peut-il pas lister les VM d’`acme-prod`, alors qu’il a un rôle sur le système ? *Réponse : lister les instances d’un projet est une opération de **projet**, et il n’a aucun rôle sur ce projet. Pour une vue globale, l’API de Nova propose `server list --all-projects`, prévue en lecture système par Secure RBAC.*
+⛔ **Observé :** `The request you have made requires authentication. (HTTP 401)`. ❓ **Question :** pourquoi ne peut-il pas lister les VM d’`acme-prod`, alors qu’il a un rôle sur le système ? *Réponse : lister les instances d’un projet est une opération de **projet**, et il n’a aucun rôle sur ce projet. Pour une vue globale, l’API de Nova propose `server list --all-projects`, prévue en lecture système par Secure RBAC.*
 
 ```bash
 os_as lab-supervision admin_domain systeme -- server list --all-projects
 ```
 
-✅ **Attendu :** à relever. Avec Secure RBAC complet, la liste réussit ; sur ce lab, où Nova ne reconnaît pas le lecteur système pour les hyperviseurs, un refus `403` est probable. Faire relier le résultat à la règle : `oslopolicy-policy-generator --namespace nova | grep "servers:index:get_all_tenants"`.
+⛔ **Observé** (18 octobre 2026) : `403 … Policy doesn't allow os_compute_api:servers:detail to be performed.` Avec Secure RBAC complet, la liste réussirait. Sur ce lab, la règle le confirme : `sudo k8s kubectl -n openstack exec nova-0 -c nova-api -- oslopolicy-policy-generator --namespace nova 2>/dev/null | grep "servers:index:get_all_tenants"` affiche `"os_compute_api:servers:index:get_all_tenants": "rule:context_is_admin"`.
 
 ### Simulation : la même opération sous trois portées
 
@@ -231,13 +257,13 @@ env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-system-scope all
 env -u OS_PROJECT_NAME -u OS_PROJECT_DOMAIN_NAME openstack --os-domain-name admin_domain hypervisor list
 ```
 
-| Portée | Secure RBAC complet (`enforce_scope = True`) | **Ce lab** (déduit ; à confirmer) |
+| Portée | Secure RBAC complet (`enforce_scope = True`) | **Ce lab** (observé le 18 octobre 2026) |
 |---|---|---|
-| Projet `admin` | ⛔ refusé : la liste des hyperviseurs est une opération système | ✅ réussit : `rule:context_is_admin` ne regarde que le rôle `admin` |
+| Projet `admin` | ⛔ refusé : la liste des hyperviseurs est une opération système | ✅ réussit (l’hyperviseur `sunbeam`, type `QEMU`, état `up`) : `rule:context_is_admin` ne regarde que le rôle `admin` |
 | Système | ✅ | ⛔ `401` : `admin` n’a aucun rôle système, pas de jeton |
-| Domaine `admin_domain` | ⛔ | ✅ probable, pour la même raison que la première ligne |
+| Domaine `admin_domain` | ⛔ | ⛔ `403 … os-hypervisors:list-detail` : le rôle `admin` sur un **domaine** ne suffit pas à Nova, qui travaille par projet |
 
-Cette expérience montre aux apprenants **pourquoi** la portée existe : avec Secure RBAC, le même rôle `admin` n’a pas le même effet selon ce qu’il cible ; sur ce lab, il a le même effet partout.
+Cette expérience montre aux apprenants **pourquoi** la portée existe : avec Secure RBAC, le même rôle `admin` n’a pas le même effet selon ce qu’il cible. Sur ce lab, un `admin` de **projet** est administrateur de tout Nova (« admin quelque part, admin partout »), alors qu’un `admin` de **domaine** n’y peut rien.
 
 ---
 
@@ -265,9 +291,9 @@ APPCRED_ID=$(python3 -c "import json; print(json.load(open('/tmp/appcred.json'))
 APPCRED_SECRET=$(python3 -c "import json; print(json.load(open('/tmp/appcred.json'))['secret'])")
 ```
 
-✅ **Attendu :** un identifiant, le rôle `reader` seul, une date d’expiration, `unrestricted = False`. ⚠ **Piège :** le **secret** n’est affiché qu’une fois, à la création ; Keystone n’en garde qu’une empreinte.
+✅ **Observé** (18 octobre 2026) : `<id> reader 2026-11-17T18:41:02.000000 False` : un identifiant, le rôle `reader` seul, une expiration à 30 jours, `unrestricted = False`. ⚠ **Piège :** le **secret** n’est affiché qu’une fois, à la création ; Keystone n’en garde qu’une empreinte.
 
-⚠ **Piège : un identifiant d’application ne reçoit que les rôles nommés à sa création.** Les rôles **impliqués** ne suivent pas. Constaté sur le lab le 18 octobre 2026 (`6-securite/04-rotation-secrets.md`, § 4.7) : bien que `member` implique `reader` (`openstack implied role list`), un identifiant créé avec `--role member` seul ne voyait pas les réseaux du projet ; avec `--role member --role reader`, il les voyait. Ici, on nomme `reader` explicitement : le script lit sans problème. Pour un script qui doit aussi créer, nommer **les deux** rôles.
+⚠ **Piège : un identifiant d’application ne reçoit que les rôles nommés à sa création.** Les rôles **impliqués** ne suivent pas. Constaté sur le lab le 18 octobre 2026 (`7-securite/04-rotation-secrets.md`, § 4.7) : bien que `member` implique `reader` (`openstack implied role list`), un identifiant créé avec `--role member` seul ne voyait pas les réseaux du projet ; avec `--role member --role reader`, il les voyait. Ici, on nomme `reader` explicitement : le script lit sans problème. Pour un script qui doit aussi créer, nommer **les deux** rôles.
 
 Le script utilise l’identifiant d’application :
 
@@ -278,7 +304,7 @@ os_appcred "$APPCRED_ID" "$APPCRED_SECRET" -- network create lab-pirate
 os_appcred "$APPCRED_ID" "$APPCRED_SECRET" -- application credential create lab-rebond
 ```
 
-✅ **Attendu :** les deux lectures réussissent. ⛔ **Refus attendu** sur la création de réseau (`reader`, ⚖ **dépend de Secure RBAC**) et sur la création d’un autre identifiant d’application (`unrestricted = False` empêche de rebondir).
+✅ **Observé** (18 octobre 2026) : les deux lectures réussissent (listes vides). ⛔ La création de réseau est refusée (`403, rule:create_network is disallowed by policy` : `reader` ne suffit pas à Neutron) ; la création d’un autre identifiant aussi (`403 … users/<id>/application_credentials, You are not authorized…` : `unrestricted = False` empêche de rebondir).
 
 ### 4.5.3 Restreindre aussi les appels : règles d’accès
 
@@ -291,9 +317,17 @@ os_appcred "$ID2" "$SEC2" -- server list
 os_appcred "$ID2" "$SEC2" -- volume list
 ```
 
-✅ **Attendu :** `server list` réussit. ⛔ **Refus attendu** sur `volume list` : l’appel n’est pas dans la liste des règles d’accès.
+⛔ **Observé sur ce lab** (18 octobre 2026) : **les deux** appels sont refusés, `server list` compris (`HttpException: 401 … The request you have made requires authentication.`). Essayé aussi avec les chemins `/openstack-nova/v2.1/servers/detail`, `/v2.1/servers/**` et même `/**` (tout chemin) : toujours `401`.
 
-⚠ **Piège :** les règles d’accès portent sur l’URL exacte appelée par le client. `openstack server list` appelle `GET /v2.1/servers/detail` ; une règle sur `/v2.1/servers` seul ne suffirait pas. Pour trouver le bon chemin : `openstack --debug server list 2>&1 | grep "REQ: curl"`.
+**Pourquoi :** le journal de Nova le dit (`sudo k8s kubectl -n openstack logs nova-0 -c nova-api --since=5m | grep keystonemiddleware`) :
+
+```text
+WARNING keystonemiddleware.auth_token […] Cannot validate request with restricted access rules. Set service_type in [keystone_authtoken] to allow access rule validation.
+```
+
+Pour vérifier une règle d’accès, chaque service doit connaître son propre type (`compute`, `volumev3`…), dans l’option `service_type` de sa section `[keystone_authtoken]`. Les charms de Sunbeam ne la règlent pas (constaté dans Nova et Cinder). **Sur ce lab, un identifiant avec règles d’accès est donc refusé par tous les services.** Le principe reste à présenter : sur un cloud où `service_type` est réglé, `server list` réussirait et `volume list` serait refusé.
+
+⚠ **Piège sur ces clouds-là :** une règle d’accès porte sur le chemin exact appelé. `openstack server list` appelle `GET …/v2.1/servers/detail` ; une règle sur `/v2.1/servers` seul ne suffirait pas. Pour trouver le chemin : `openstack --debug server list 2>&1 | grep "REQ: curl"`.
 
 ### 4.5.4 L’identifiant suit les droits de son propriétaire
 
@@ -305,7 +339,7 @@ openstack role add --user emma --user-domain acme --project acme-prod --project-
 openstack role add --user emma --user-domain acme --domain acme --inherited reader
 ```
 
-⛔ **Refus attendu (401)** pendant qu’Emma n’a plus de rôle sur `acme-prod` : un identifiant d’application ne peut jamais dépasser les droits de son propriétaire, et les perd avec lui.
+⛔ **Observé** (18 octobre 2026) : `(HTTP 401)` pendant qu’Emma n’a plus de rôle sur `acme-prod`, puis la liste répond de nouveau quand ses rôles sont rendus : un identifiant d’application ne peut jamais dépasser les droits de son propriétaire, et les perd avec lui.
 
 ### 4.5.5 Révoquer
 
@@ -317,7 +351,7 @@ os_appcred "$APPCRED_ID" "$APPCRED_SECRET" -- server list
 rm -f /tmp/appcred.json /tmp/appcred2.json
 ```
 
-⛔ **Refus attendu (401)** après la suppression.
+⛔ **Observé** (18 octobre 2026) : `Could not find Application Credential: <id>. (HTTP 404)` : l’identifiant n’existe plus.
 
 | Besoin | Compte dédié (utilisateur) | Identifiant d’application |
 |---|---|---|
@@ -338,7 +372,7 @@ openstack role assignment list --role admin --names
 openstack role assignment list --role admin --names --effective
 ```
 
-✅ **Attendu :** `admin@admin_domain` (sur le projet `admin` et sur le domaine `admin_domain`), `_charm-keystone-admin@Default` (sur le système et le projet `admin` de `Default`), et les comptes de service sur `services` (TP 1, § 1.2) ; **aucun** compte d’`acme` ou de `partenaire`. ❓ **Question :** pourquoi regarder aussi la liste effective ? *Réponse : un rôle personnalisé qui implique `admin`, ou un groupe qui a `admin`, n’apparaît pas dans la liste simple.*
+✅ **Observé** (18 octobre 2026) : `admin@admin_domain` (sur le projet `admin` et sur le domaine `admin_domain`), `_charm-keystone-admin@Default` (sur le système et le projet `admin` de `Default`), et les neuf comptes de service sur `services` (TP 1, § 1.2) ; **aucun** compte d’`acme` ou de `partenaire`. Curiosité : la liste **effective** n’affiche pas l’affectation **système** de `_charm-keystone-admin` ; pour les rôles système, regarder la liste simple ou `role assignment list --system all`. ❓ **Question :** pourquoi regarder aussi la liste effective ? *Réponse : un rôle personnalisé qui implique `admin`, ou un groupe qui a `admin`, n’apparaît pas dans la liste simple.*
 
 ### Que peut faire un compte ?
 
@@ -369,7 +403,7 @@ openstack token revoke "$T"
 
 **La commande, mot par mot :** `T` est un jeton administrateur, `K` l’adresse de Keystone lue dans le catalogue ; pour chaque compte d’`acme`, l’API `GET /v3/users/<id>/application_credentials` liste ses identifiants, dont le programme Python affiche le nom et l’expiration ; `${OS_CACERT:+--cacert …}` n’ajoute la CA que si le cloud est en HTTPS ; le jeton est révoqué à la fin.
 
-✅ **Attendu** (à confirmer) : une ligne par identifiant encore présent, par exemple `emma : lab-sauvegarde expire …` si le § 4.5.5 n’a pas été joué ; aucune ligne s’il l’a été.
+✅ **Observé** (18 octobre 2026, avant le § 4.5.5) : `emma : lab-sauvegarde expire 2026-11-17T18:41:02.000000` et `emma : lab-sauvegarde-strict expire None`. Après le § 4.5.5, aucune ligne. Le `None` est un écart à la règle de l’exercice ci-dessous : `lab-sauvegarde-strict` a été créé **sans** expiration.
 
 ### Exercice : la revue des droits
 
@@ -383,7 +417,7 @@ openstack role remove --user emma --user-domain acme --project acme-prod --proje
 openstack role assignment list --user emma --user-domain acme --names --effective
 ```
 
-✅ **Attendu :** Emma garde `member` sur `acme-prod`, désormais **via le groupe**. Un départ ou une arrivée se gère en ajoutant ou retirant le compte du groupe.
+✅ **Observé** (18 octobre 2026) : Emma garde `member` sur `acme-prod`, désormais **via le groupe** (la liste effective développe les groupes : la ligne `member emma@acme acme-prod@acme` reste, mais vient du groupe `acme-exploitation`). Un départ ou une arrivée se gère en ajoutant ou retirant le compte du groupe.
 
 ---
 

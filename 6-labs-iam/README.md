@@ -2,7 +2,21 @@
 
 Ces travaux pratiques accompagnent les modules 8 à 12 du support (`support/8-…` à `support/12-…`). Les supports expliquent ; ici, on **fait** : chaque TP enchaîne des scénarios reproductibles, avec les commandes, le résultat attendu, les questions à poser aux apprenants et les pièges.
 
-> **Statut :** le **TP 1 a été rejoué** sur le lab le 17 octobre 2026 (Keystone 2024.1 déployé par Sunbeam, client `openstack` 7.5.0) ; ses résultats sont ceux observés. Les **TP 2 à 5 ne sont pas encore rejoués** : ils ont été relus et mis en cohérence avec ce que le TP 1 a montré, et les résultats qui en sont déduits sont marqués « à confirmer ». Rejoue chaque TP avant de l’utiliser en formation et note les écarts.
+> **Statut :** les **TP 1 à 5 ont été rejoués** sur le lab les 17 et 18 octobre 2026 (Keystone 2024.1 déployé par Sunbeam, client `openstack` 7.5.0). Les résultats indiqués sont ceux observés, et les commandes ont été corrigées là où le client ou les charms l’imposaient. Si une autre version change un résultat, note l’écart.
+
+### Pièges du client et du lab relevés au rejeu
+
+| Constat | Ce que font les TP |
+|---|---|
+| Un `role add` refusé n’affiche **rien** et rend le code 0 (Keystone journalise pourtant `ForbiddenAction`) | Vérifier chaque délégation avec `role assignment list`, ou appeler l’API avec `curl` pour voir le vrai `403` (TP 2, TP 4, TP 5) |
+| `quota show` et `quota set` refusent `--domain` | Passer l’**identifiant** du projet (`openstack project show … -f value -c id`) (TP 3, TP 4, TP 5) |
+| `implied role create` sur un rôle propre à un domaine envoie `PUT /roles/None/implies` (404) | Créer l’implication par l’API (TP 2) |
+| `application credential list --user` plante (`'function' object has no attribute 'list'`) | Lister par l’API, ou depuis la session du propriétaire (TP 4) |
+| Les rôles impliqués ne sont **pas** transmis aux identifiants d’application | Donner explicitement chaque rôle voulu à l’identifiant (TP 4) |
+| Les charms ne règlent pas `service_type` dans `[keystone_authtoken]` | Les identifiants d’application à règles d’accès sont refusés (`401`) partout : démonstration remplacée par l’explication (TP 4, § 4.5.3) |
+| Un jeton révoqué reste accepté par Neutron une trentaine de secondes (cache) | Attendre avant de constater le `401` (TP 1, § 1.4.6) |
+| `user list` sans `--domain` ne liste que le domaine du jeton (`admin_domain`) | Toujours préciser `--domain` (TP 2, TP 5) |
+| Supprimer un projet ne supprime ni ses réseaux ni ses groupes de sécurité | `nettoyage.sh` les supprime avant le projet ; les VM et volumes restent à supprimer à la main |
 
 ### Ce que le TP 1 a montré, et qui change les TP suivants
 
@@ -67,7 +81,7 @@ ssh vagrant@192.168.56.10
 Copie d’abord ce dossier depuis Windows (PowerShell, dans le dossier du dépôt) :
 
 ```powershell
-scp -r .\labs-iam vagrant@192.168.56.10:~/
+scp -r .\6-labs-iam vagrant@192.168.56.10:~/labs-iam
 ```
 
 ## Préparer la session : `lab-env.sh`
@@ -106,7 +120,6 @@ Sans `os_as`, les commandes s’exécutent en tant qu’`admin` sur le projet `a
 | ✅ **Attendu** | Résultat attendu si tout est conforme |
 | ⛔ **Refus attendu** | La commande **doit** échouer : c’est la démonstration |
 | ⚖ **dépend de Secure RBAC** | Le résultat change selon `enforce_scope` et `enforce_new_defaults` (TP 1, § 1.6) |
-| « à confirmer » | Résultat **déduit** des règles lues au TP 1, pas encore observé |
 | ❓ **Question** | À poser aux apprenants avant de lancer la commande |
 | ⚠ **Piège** | Erreur fréquente ou comportement contre-intuitif |
 
@@ -118,6 +131,6 @@ Les noms d’objets créés commencent par `acme` ou `partenaire`, ou par `lab-`
 bash ~/labs-iam/nettoyage.sh
 ```
 
-Le script supprime, dans l’ordre, les identifiants d’application, les projets, les utilisateurs, les groupes, les rôles et les domaines créés par les TP. Il affiche ce qu’il va supprimer et demande confirmation. Les objets de Sunbeam (`admin_domain`, `service_domain`, `users`, `Default`, projets `admin`, `demo`, `services`) ne sont jamais touchés.
+Le script supprime, dans l’ordre, les réseaux et groupes de sécurité des projets, les projets (avec les identifiants d’application de leurs utilisateurs), les utilisateurs, les groupes, les rôles et les domaines créés par les TP. Il affiche ce qu’il va supprimer et demande confirmation. Les objets de Sunbeam (`admin_domain`, `service_domain`, `users`, `Default`, projets `admin`, `demo`, `services`) ne sont jamais touchés.
 
 **Avant un export des OVA**, lance le nettoyage puis supprime le dossier : `rm -rf ~/labs-iam`.

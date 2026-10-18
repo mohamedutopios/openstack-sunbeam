@@ -1,6 +1,6 @@
 # TP 5 : scénario intégré, mettre en service et auditer un SI cloisonné
 
-> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab le 18 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0), mise en œuvre, audit et les sept incidents. Corrections : les quotas désignent les projets par leur identifiant (`quota set` n’accepte pas `--domain`) ; les refus des lignes 1 et 2 de l’audit ne s’affichent pas comme un `403` (client). Voir les conventions dans [README.md](README.md).
 
 **Modules du support :** 8 à 12.
 **Durée :** 3 h (1 h 30 de mise en œuvre, 30 min d’audit, 1 h d’incidents).
@@ -51,7 +51,7 @@ openstack role add --user gaelle --user-domain lab-globex --domain lab-globex ma
 openstack role assignment list --domain lab-globex --names
 ```
 
-✅ **Attendu :** `gaelle@lab-globex` → `manager` sur le domaine `lab-globex`. Dans le modèle Secure RBAC, c’est la **seule** affectation que la plateforme fait sur Globex ; sur ce lab, elle devra aussi faire la phase 2 à la place de Gaëlle.
+✅ **Observé :** `gaelle@lab-globex` → `manager` sur le domaine `lab-globex`. Dans le modèle Secure RBAC, c’est la **seule** affectation que la plateforme fait sur Globex ; sur ce lab, elle devra aussi faire la phase 2 à la place de Gaëlle.
 
 ### Phase 2 : la gestionnaire organise son domaine (compte `gaelle`, jeton de domaine)
 
@@ -61,7 +61,7 @@ Dans le modèle Secure RBAC, c’est Gaëlle qui fait cette phase. **Sur ce lab,
 os_as gaelle lab-globex domaine lab-globex -- project create globex-si --domain lab-globex
 ```
 
-⛔ **Refus attendu (403)** sur ce lab (à confirmer). On fait alors faire la phase par la plateforme, **avec les mêmes commandes** : la fonction `G` désigne qui agit. Choisir **une** des deux lignes :
+⛔ **Observé** (18 octobre 2026) : `You are not authorized to perform the requested action: identity:create_project. (HTTP 403)`. On fait alors faire la phase par la plateforme, **avec les mêmes commandes** : la fonction `G` désigne qui agit. Choisir **une** des deux lignes :
 
 ```bash
 G() { openstack "$@"; }                                          # ce lab : la plateforme agit pour Gaelle
@@ -89,7 +89,7 @@ G role add --group globex-audit --group-domain lab-globex --domain lab-globex --
 G role assignment list --domain lab-globex --names
 ```
 
-✅ **Attendu :** avec `G` = `openstack`, toutes les commandes réussissent. Avec `G` = Gaëlle, sur ce lab, elles échoueraient en `403` : c’est une limite du rôle `manager` de ce Keystone, à faire relever dans l’évaluation (partie E).
+✅ **Observé :** avec `G` = `openstack`, toutes les commandes réussissent ; `role assignment list --domain lab-globex` montre `manager gaelle` et `reader` hérité pour le groupe `globex-audit` (les affectations sur les projets se lisent avec `--project`). Avec `G` = Gaëlle, sur ce lab, elles échoueraient en `403` : c’est une limite du rôle `manager` de ce Keystone, à faire relever dans l’évaluation (partie E).
 
 ✅ **Attendu (corrigé du livrable) :**
 
@@ -131,7 +131,7 @@ os_as ines lab-globex projet globex-dev lab-globex -- network list
 os_as jules lab-globex projet globex-prod lab-globex -- network list
 ```
 
-✅ **Attendu :** Hugo et Inès créent leurs réseaux ; Inès voit le réseau de développement ; Jules voit celui de production.
+✅ **Observé :** Hugo et Inès créent leurs réseaux ; Inès voit `globex-dev-net` (et `external-network`) ; Jules voit `globex-prod-net`.
 
 ### Phase 5 : le compte de service de supervision (compte `ines`)
 
@@ -144,7 +144,7 @@ AC_SECRET=$(python3 -c "import json; print(json.load(open('/tmp/globex-ac.json')
 os_appcred "$AC_ID" "$AC_SECRET" -- server list
 ```
 
-✅ **Attendu :** la liste (vide) des instances de `globex-prod`, sans mot de passe.
+✅ **Observé :** la liste (vide) des instances de `globex-prod`, sans mot de passe.
 
 ⚠ L’identifiant ne reçoit que les rôles **nommés** à sa création, pas les rôles impliqués (TP 4, § 4.5.2) : `--role reader` est donc indispensable ici, même si Inès a `member`, qui implique `reader`.
 
@@ -156,8 +156,8 @@ Les apprenants vérifient chaque exigence du cahier des charges par une commande
 
 | # | Exigence | Commande de vérification | Attendu |
 |---|---|---|---|
-| 1 | Gaëlle ne sort pas de son domaine | `os_as gaelle lab-globex domaine lab-globex -- user list --domain users` | ⛔ 403 |
-| 2 | Gaëlle ne peut pas créer d’administrateur | `os_as gaelle lab-globex domaine lab-globex -- role add --user hugo --user-domain lab-globex --project globex-dev --project-domain lab-globex admin` | ⛔ 403 |
+| 1 | Gaëlle ne sort pas de son domaine | `os_as gaelle lab-globex domaine lab-globex -- user list --domain users` | ⛔ le client échoue : `'NoneType' object has no attribute 'id'` (voir ci-dessous) |
+| 2 | Gaëlle ne peut pas créer d’administrateur | `os_as gaelle lab-globex domaine lab-globex -- role add --user hugo --user-domain lab-globex --project globex-dev --project-domain lab-globex admin` | ⛔ aucun message, code de sortie 0 : vérifier avec la ligne 7 (`0`) |
 | 3 | Hugo n’a rien en production | `os_as hugo lab-globex projet globex-prod lab-globex -- server list` | ⛔ 401 |
 | 4 | Inès lit le développement sans le modifier | `os_as ines lab-globex projet globex-dev lab-globex -- network create globex-intrus` | ⛔ 403 |
 | 5 | Jules lit tout, ne modifie rien | `os_as jules lab-globex projet globex-dev lab-globex -- network create globex-intrus` | ⛔ 403 |
@@ -166,6 +166,10 @@ Les apprenants vérifient chaque exigence du cahier des charges par une commande
 | 8 | Quotas conformes | `openstack quota show "$GDEV"` | `instances` 2, `cores` 2, `ram` 4096, `networks` 2 |
 | 9 | Le compte de supervision ne fait que lire | `os_appcred "$AC_ID" "$AC_SECRET" -- network create globex-intrus` | ⛔ 403 |
 | 10 | Il expire sous 30 jours | `os_as ines lab-globex projet globex-prod lab-globex -- application credential show globex-supervision -c expires_at` | date à J+30 |
+
+✅ **Observé** (18 octobre 2026) : les dix exigences sont vérifiées (✅), avant les incidents et après leur correction.
+
+⚠ **Lignes 1 et 2 : le client masque les refus** (client 7.5.0 ; TP 2, § 2.4). Gaëlle ne peut pas lire le domaine `users` : le client ne trouve pas son identifiant et plante (`'NoneType' object has no attribute 'id'`). Et un `role add` refusé n’affiche rien : seule la ligne 7 prouve qu’aucun `admin` n’a été créé. Pour voir le vrai `403`, appeler l’API avec le jeton de Gaëlle, comme au TP 2.
 
 Les refus attendus sont cohérents avec les règles lues au TP 1 (§ 1.6.2), même sans Secure RBAC complet :
 
@@ -213,7 +217,7 @@ Le formateur injecte un incident à la fois, **sans dire lequel**. L’apprenant
 | I4 | `401` pour tous ; `domain show` : `enabled = False` | `openstack domain set --enable lab-globex` |
 | I5 | `role assignment list --role admin --effective` montre `jules` sur `globex-si` | retirer l’affectation ; rappeler pourquoi `admin` déborde de sa cible |
 | I6 | `401` avec l’identifiant d’application ; Inès n’a plus de rôle sur `globex-prod` | rétablir `member` pour le groupe ; l’identifiant d’application suit les droits de son propriétaire |
-| I7 | `More than one user exists with the name 'hugo'` | corriger le script : `--domain lab-globex`, ou l’identifiant ; supprimer le compte en trop dans `users` |
+| I7 | Avec le jeton de l’administrateur (domaine `admin_domain`) : `No User found for hugo` (constaté le 18 octobre 2026) ; avec un jeton d’un autre domaine, selon où le client cherche : `No User found` ou `More than one user exists with the name 'hugo'`. Dans les deux cas, le nom seul ne désigne pas le bon compte | corriger le script : `--domain lab-globex`, ou l’identifiant ; supprimer le compte en trop dans `users` |
 
 ⚠ Après chaque incident, **vérifier que la correction est complète** en rejouant l’audit de la partie C.
 
