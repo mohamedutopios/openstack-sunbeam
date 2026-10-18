@@ -75,6 +75,7 @@ cleanup() {  # supprime par identifiant : plusieurs profils creent un objet du m
     openstack volume list --all-projects --name lab-mx-vol -f value -c ID | xargs -r -n1 openstack volume delete >/dev/null 2>&1
     openstack image list --name lab-mx-img -f value -c ID | xargs -r -n1 openstack image delete >/dev/null 2>&1
 }
+PROD=$(openstack project show acme-prod --domain acme -f value -c id)  # quota set n'accepte pas --domain
 printf "%-44s  %-11s %-11s %-11s\n" "Operation" "reader" "member" "manager"
 row "Lister les instances"                server list
 row "Lister les reseaux"                  network list
@@ -83,9 +84,23 @@ row "Creer un groupe de securite"         security group create lab-mx-sg
 row "Creer un volume de 1 Go"             volume create --size 1 lab-mx-vol
 row "Creer un reseau partage"             network create --share lab-mx-shared
 row "Lister les affectations du projet"   role assignment list --project acme-prod --project-domain acme
-row "Donner reader a chloe sur le projet" role add --user chloe --user-domain acme --project acme-prod --project-domain acme reader
-openstack role remove --user chloe --user-domain acme --project acme-prod --project-domain acme reader >/dev/null 2>&1
-row "Modifier les quotas du projet"       quota set acme-prod --domain acme --instances 9
+grant() {  # role add refuse ne renvoie pas d'erreur (client 7.5.0) : on verifie l'affectation
+    printf "%-44s" "Donner reader a chloe sur le projet"
+    for u in david emma bruno; do
+        os_as "$u" acme projet acme-prod acme -- role add --user chloe --user-domain acme \
+            --project acme-prod --project-domain acme reader >/dev/null 2>&1
+        if openstack role assignment list --user chloe --user-domain acme --project acme-prod \
+               --project-domain acme --names -f value -c Role | grep -qx reader; then
+            printf "  %-8s ✅" "$u"
+        else
+            printf "  %-8s ⛔" "$u"
+        fi
+        openstack role remove --user chloe --user-domain acme --project acme-prod --project-domain acme reader >/dev/null 2>&1
+    done
+    echo
+}
+grant
+row "Modifier les quotas du projet"       quota set "$PROD" --instances 9
 row "Lister les hyperviseurs"             hypervisor list
 row "Creer une image publique"            image create --public --disk-format raw --container-format bare lab-mx-img
 echo "Nettoyage des objets de test..."

@@ -1,6 +1,6 @@
 # TP 1 : Keystone en profondeur
 
-> Statut : **rejoué sur le lab le 17 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats ✅ ci-dessous sont ceux observés. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab les 17 et 18 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats ✅ ci-dessous sont ceux observés. Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 8, Keystone en profondeur.
 **Durée :** 2 h 30.
@@ -23,7 +23,7 @@ $K get pod keystone-0 -o wide
 $K logs keystone-0 -c keystone --tail=5
 ```
 
-✅ **Attendu :** l’application `keystone` est `active` ; un pod `keystone-0` avec deux conteneurs (`charm`, `keystone`) ; des lignes Apache `"POST /openstack-keystone/v3/auth/tokens HTTP/1.1" 201`.
+✅ **Observé** (18 octobre 2026) : l’application `keystone` est `active` ; un pod `keystone-0` en `2/2` (deux conteneurs, `charm` et `keystone`) ; des lignes du serveur web Apache. Selon le moment, ce sont surtout des `"GET /healthcheck HTTP/1.1" 200` (le test de santé que Pebble fait toutes les quelques secondes) ou des `"POST /openstack-keystone/v3/auth/tokens HTTP/1.1" 201` (des demandes de jetons). Pour ne voir que les jetons : `$K logs keystone-0 -c keystone --since=10m | grep auth/tokens | tail -3`.
 
 ❓ **Question :** pourquoi `keystone-0` n’a-t-il pas de base de données dans le pod ? *Réponse : il utilise MySQL (pod `mysql-0`) via `keystone-mysql-router` ; Keystone est sans état local, hormis ses clés Fernet.*
 
@@ -117,7 +117,16 @@ Voir le catalogue dans le jeton lui-même, et l’appel qui suit :
 openstack --debug network list 2>&1 | grep -E "^REQ: curl|^RESP: \[" | head -6
 ```
 
-✅ **Attendu :** une requête vers `…/openstack-keystone/v3/auth/tokens`, puis une vers `http://cloud.lab.test:80/openstack-neutron/v2.0/networks`. Le client a lu l’adresse de Neutron **dans le catalogue renvoyé avec le jeton** ; il ne la connaissait pas.
+✅ **Observé** (18 octobre 2026) :
+
+```text
+REQ: curl -g -i -X GET http://cloud.lab.test/openstack-keystone/v3 …
+RESP: [200] …
+REQ: curl -g -i -X GET http://cloud.lab.test:80/openstack-neutron/v2.0/networks …
+RESP: [200] …
+```
+
+**Comment le lire :** le client interroge d’abord Keystone (`GET …/v3` : découverte de la version de l’API), puis obtient un jeton (`POST …/auth/tokens`, que le client n’affiche pas sous la forme `REQ: curl`, car la requête contient le mot de passe), puis appelle Neutron. L’adresse de Neutron, `http://cloud.lab.test:80/openstack-neutron`, il l’a lue **dans le catalogue renvoyé avec le jeton** ; il ne la connaissait pas.
 
 ### Simulation : demander une autre interface
 
@@ -176,6 +185,8 @@ roles : ['member', 'reader']
 services au catalogue : 9
 expire : 2026-10-17T21:47:25.000000Z
 ```
+
+L’ordre des rôles peut varier d’un jeton à l’autre (`['reader', 'member']` le 18 octobre) : Keystone ne les trie pas.
 
 ### 1.4.3 Les portées : sans portée, projet, domaine, système
 
@@ -273,17 +284,29 @@ curl -s -o /dev/null -w "appel Neutron après révocation : %{http_code}\n" \
   "http://cloud.lab.test/openstack-neutron/v2.0/networks" -H "X-Auth-Token: $TOKEN"
 ```
 
-✅ **Observé :** `validation après révocation : 404`, `appel Neutron après révocation : 401`. ⚠ **Piège :** les services gardent les validations en cache quelques minutes (`keystonemiddleware`, `token_cache_time`) : un jeton révoqué peut encore être accepté par un service peu de temps après la révocation.
+✅ **Observé :** `validation après révocation : 404` : Keystone refuse aussitôt le jeton. Pour Neutron, ça dépend du moment : le 17 octobre, `appel Neutron après révocation : 401` ; le 18 octobre, `200`.
+
+**Pourquoi :** un service garde en **cache** les jetons qu’il vient de faire valider (bibliothèque `keystonemiddleware`), pour ne pas interroger Keystone à chaque appel. Un jeton que Neutron venait d’accepter (§ 1.4.5) est donc encore accepté juste après sa révocation. Mesuré le 18 octobre :
+
+| Moment | Appel Neutron avec le jeton révoqué |
+|---|---|
+| Avant révocation | `200` |
+| Juste après | `200` (cache) |
+| 30 secondes après, et ensuite | `401` |
+
+⚠ **Piège :** révoquer un jeton volé ne le coupe pas **instantanément** partout : il reste utilisable quelques secondes, le temps que les caches des services expirent.
 
 ### 1.4.7 Durée de vie et clés Fernet
 
 ```bash
 python3 -c "import json; print(json.load(open('/tmp/token-body.json'))['token']['expires_at'])"
 date -u +%Y-%m-%dT%H:%M:%S
-$K exec keystone-0 -c keystone -- sh -c 'grep -A6 "^\[token\]" /etc/keystone/keystone.conf; grep -A4 "^\[fernet_tokens\]" /etc/keystone/keystone.conf; ls -l /etc/keystone/fernet-keys/'
+$K exec keystone-0 -c keystone -- sh -c 'awk "/^\[/{p=(\$0==\"[token]\" || \$0==\"[fernet_tokens]\")} p && NF" /etc/keystone/keystone.conf; ls -l /etc/keystone/fernet-keys/'
 ```
 
-✅ **Observé :**
+**La commande, mot par mot :** `awk` lit le fichier ligne par ligne ; à chaque titre de section (`[…]`), il note si c’est `[token]` ou `[fernet_tokens]` ; il n’affiche que les lignes non vides (`NF`) de ces deux sections. `ls -l` liste les clés. (Un simple `grep -A6 "^\[token\]"` afficherait aussi le début des sections voisines.)
+
+✅ **Observé** (17 octobre ; le 18, après une rotation, les clés étaient `0`, `8`, `9`, `10` : les numéros changent chaque jour, voir `6-securite/04-rotation-secrets.md`, § 4.3) :
 
 ```text
 [token]
@@ -382,7 +405,7 @@ LAB_PW="${LAB_PW}-2" os_as lab-pwtest users projet demo users -- token issue -c 
 openstack user delete lab-pwtest --domain users
 ```
 
-✅ **Attendu** (variante par l’API **pas encore rejouée** sur le lab) : `changement : 204`, puis un jeton obtenu avec le nouveau mot de passe. Un utilisateur change son mot de passe avec **son propre** jeton, en prouvant qu’il connaît l’ancien.
+✅ **Observé** (18 octobre 2026) : `changement : 204`, puis un jeton obtenu avec le nouveau mot de passe. Un utilisateur change son mot de passe avec **son propre** jeton, en prouvant qu’il connaît l’ancien.
 
 ⚠ **Pièges :**
 

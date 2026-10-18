@@ -1,6 +1,6 @@
 # TP 3 : projets, hiérarchie et quotas
 
-> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab le 18 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats « Observé » sont ceux de ce jour. Correction principale : les commandes de quotas désignent le projet par son identifiant, car `quota show` et `quota set` n’acceptent pas `--domain` (§ 3.4). Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 10, projets, hiérarchie et quotas.
 **Durée :** 2 h 30.
@@ -24,7 +24,7 @@ os_as chloe acme projet acme-dev acme -- security group create acme-dev-web
 os_as chloe acme projet acme-dev acme -- network list
 ```
 
-✅ **Attendu :** le réseau `acme-dev-net` et le groupe `acme-dev-web` sont créés dans `acme-dev`. La liste montre aussi `external-network` (réseau externe partagé par la plateforme), mais pas `demo-network`.
+✅ **Observé** (18 octobre 2026) : le réseau `acme-dev-net` et le groupe `acme-dev-web` sont créés dans `acme-dev`. La liste montre `external-network` (le réseau externe de la plateforme) et `acme-dev-net`, mais pas `demo-network`.
 
 Emma n’a encore aucun rôle sur `acme-dev` :
 
@@ -32,7 +32,7 @@ Emma n’a encore aucun rôle sur `acme-dev` :
 os_as emma acme projet acme-dev acme -- network list
 ```
 
-⛔ **Refus attendu (401) :** Emma ne peut même pas obtenir de jeton sur un projet où elle n’a aucun rôle.
+⛔ **Observé :** `The request you have made requires authentication. (HTTP 401)`. Emma ne peut même pas obtenir de jeton sur un projet où elle n’a aucun rôle.
 
 ❓ **Question :** qu’est-ce qui est étanche entre deux projets, et qu’est-ce qui est partagé ? *Réponse : étanches : VM, volumes, réseaux privés, groupes de sécurité, clés, quotas. Partagés : images publiques, flavors publics, réseaux marqués partagés ou externes, et l’infrastructure physique (hyperviseurs).*
 
@@ -44,7 +44,7 @@ openstack project show acme-dev --domain acme -c tags
 openstack project list --domain acme --tags env:dev
 ```
 
-✅ **Attendu :** les étiquettes sont stockées sur le projet ; le filtre `--tags` retrouve les projets d’un environnement. Usage typique : refacturation, inventaire, automatisation.
+✅ **Observé :** `tags ['app:portail', 'env:dev']`, et le filtre `--tags env:dev` retrouve `acme-dev`. Les étiquettes sont stockées sur le projet. Usage typique : refacturation, inventaire, automatisation.
 
 ---
 
@@ -60,7 +60,7 @@ openstack project show acme-prod --domain acme --parents -c name -c parent_id -c
 openstack project list --domain acme --long
 ```
 
-✅ **Attendu :**
+✅ **Observé** (18 octobre 2026) : l’arbre suivant.
 
 ```text
 acme (domaine)
@@ -70,7 +70,13 @@ acme (domaine)
     └── acme-recette
 ```
 
-`openstack project list --long` affiche la colonne `Parent ID` : `acme-si` a pour parent le **domaine** `acme` (un domaine est la racine de son arbre).
+**Comment le lire dans les sorties**, qui ne donnent que des identifiants :
+
+| Commande | Ce qu’elle affiche |
+|---|---|
+| `project show acme-si --children` | `subtree` : les identifiants des trois enfants (`{'7d3b…': None, '9b17…': None, 'd54c…': None}`) |
+| `project show acme-prod --parents` | `parent_id` : l’identifiant d’`acme-si` ; `parents` : `{<acme-si>: {<acme>: None}}`, la chaîne jusqu’au **domaine** `acme`, racine de l’arbre |
+| `project list --domain acme --long` | Les quatre projets, avec leur `Domain ID`. ⚠ Pas de colonne `Parent ID` dans ce client : le parent se lit avec `openstack project show <projet> --domain acme -c parent_id` |
 
 ### Les règles de l’arbre
 
@@ -79,14 +85,14 @@ openstack project create lab-hors-domaine --domain partenaire --parent acme-si
 openstack project delete acme-si --domain acme
 ```
 
-⛔ **Refus attendu** pour les deux :
+⛔ **Observé** (18 octobre 2026), refus pour les deux :
 
-| Tentative | Règle |
-|---|---|
-| Parent dans un autre domaine | Un arbre ne traverse pas les domaines |
-| Supprimer un parent qui a des enfants | Il faut supprimer (ou déplacer) les enfants d’abord |
+| Tentative | Message | Règle |
+|---|---|---|
+| Parent dans un autre domaine | `Cannot create project, since it specifies its domain_id …, but specifies a parent in a different domain (…). (HTTP 400)` | Un arbre ne traverse pas les domaines |
+| Supprimer un parent qui a des enfants | `Cannot delete the project … since it is not a leaf in the hierarchy. Use the cascade option if you want to delete a whole subtree.` | Il faut supprimer (ou déplacer) les enfants d’abord |
 
-❓ **Question :** quelle est la profondeur maximale d’un arbre ? *Réponse : réglage `max_project_tree_depth` de Keystone (5 par défaut). Vérifier : `sudo k8s kubectl -n openstack exec keystone-0 -c keystone -- grep max_project_tree_depth /etc/keystone/keystone.conf`.*
+❓ **Question :** quelle est la profondeur maximale d’un arbre ? *Réponse : réglage `max_project_tree_depth` de Keystone, 5 par défaut. Sur le lab, `sudo k8s kubectl -n openstack exec keystone-0 -c keystone -- grep max_project_tree_depth /etc/keystone/keystone.conf` ne trouve rien (`command terminated with exit code 1`) : le réglage n’est pas écrit, la valeur par défaut s’applique.*
 
 ---
 
@@ -102,7 +108,7 @@ openstack role assignment list --user david --user-domain acme --names
 openstack role assignment list --user david --user-domain acme --names --effective
 ```
 
-✅ **Attendu :**
+✅ **Observé** (18 octobre 2026) :
 
 - liste simple : une affectation `reader` sur `acme-si`, marquée `Inherited = True` ;
 - liste effective : `reader` sur `acme-dev`, `acme-prod` et `acme-recette`, **mais pas sur `acme-si` lui-même**. Un rôle hérité s’applique au sous-arbre, pas au projet qui le porte.
@@ -113,7 +119,7 @@ os_as david acme projet acme-dev acme -- network create acme-intrus
 os_as david acme projet acme-si acme -- network list
 ```
 
-✅ **Attendu :** la lecture réussit sur `acme-dev`. ⛔ **Refus attendu (403)** sur la création : sur ce lab, la règle de Neutron est `create_network: (rule:admin_only) or (role:member and project_id:%(project_id)s)` (TP 1, § 1.6.2) ; elle exige `member`, et `reader` n’implique pas `member`. ⛔ **Refus attendu (401)** sur `acme-si` : aucun rôle effectif sur ce projet.
+✅ **Observé :** la lecture réussit sur `acme-dev` (`external-network`, `acme-dev-net`). ⛔ La création est refusée : `ForbiddenException: 403, rule:create_network is disallowed by policy`. Sur ce lab, la règle de Neutron est `create_network: (rule:admin_only) or (role:member and project_id:%(project_id)s)` (TP 1, § 1.6.2) ; elle exige `member`, et `reader` n’implique pas `member`. ⛔ Sur `acme-si` : `(HTTP 401)`, aucun rôle effectif sur ce projet.
 
 ### Simulation : un nouveau projet hérite automatiquement
 
@@ -125,7 +131,7 @@ os_as david acme projet acme-dev-api acme -- server list
 
 Le projet est créé par la plateforme : sur ce lab, le gestionnaire de domaine ne peut pas créer de projet (TP 2, § 2.4).
 
-✅ **Attendu :** David a déjà `reader` sur `acme-dev-api`, sans qu’on l’ait ajouté : l’héritage s’évalue à chaque jeton.
+✅ **Observé :** une ligne `reader | david@acme | | acme-dev-api@acme | … | True`, et `server list` répond (liste vide) : David a déjà `reader` sur `acme-dev-api`, sans qu’on l’ait ajouté. L’héritage s’évalue à chaque jeton.
 
 ### Scénario : Emma, exploitante
 
@@ -137,7 +143,7 @@ openstack role add --user emma --user-domain acme --domain acme --inherited read
 openstack role assignment list --user emma --user-domain acme --names --effective
 ```
 
-✅ **Attendu :** `member` sur `acme-prod`, `reader` sur **tous** les projets du domaine `acme` (y compris `acme-si`, cette fois : l’héritage depuis le **domaine** couvre tous ses projets).
+✅ **Observé :** `member` sur `acme-prod`, `reader` sur **tous** les projets du domaine `acme` (y compris `acme-si`, cette fois : l’héritage depuis le **domaine** couvre tous ses projets).
 
 | Affectation | Où s’applique-t-elle |
 |---|---|
@@ -155,36 +161,52 @@ openstack role add --user chloe --user-domain acme --project acme-dev-api --proj
 os_as chloe acme projet acme-dev-api acme -- network list
 ```
 
-✅ **Attendu :** `acme-dev-net` **n’apparaît pas**. La hiérarchie transmet des **rôles**, jamais des **ressources** : un réseau, une VM, un volume restent dans leur projet. Pour partager, il faut un partage explicite (RBAC de Neutron, module 13).
+✅ **Observé :** seulement `external-network` : `acme-dev-net` **n’apparaît pas**. La hiérarchie transmet des **rôles**, jamais des **ressources** : un réseau, une VM, un volume restent dans leur projet. Pour partager, il faut un partage explicite (RBAC de Neutron, module 13).
 
 ---
 
 ## 3.4 Les quotas
 
+⚠ **Piège du client, à connaître avant tout :** `openstack quota show` et `openstack quota set` n’acceptent **pas** l’option `--domain` (client 7.5.0 : `error: unrecognized arguments: --domain acme`, constaté le 18 octobre 2026). Et un nom de projet seul est ambigu dès que deux domaines ont un projet du même nom. On désigne donc le projet par son **identifiant**, lu une fois pour toutes :
+
+```bash
+DEV=$(openstack project show acme-dev --domain acme -f value -c id)
+REC=$(openstack project show acme-recette --domain acme -f value -c id)
+echo "$DEV $REC"
+```
+
 ### 3.4.1 Lire
 
 ```bash
 openstack quota show --default
-openstack quota show acme-dev --domain acme
-openstack quota show --usage acme-dev --domain acme
+openstack quota show "$DEV"
+openstack quota show --usage "$DEV"
 sudo k8s kubectl -n openstack exec nova-0 -c nova-api -- grep -A3 "^\[quota\]" /etc/nova/nova.conf
 openstack registered limit list
 ```
 
-✅ **Attendu :** les quotas d’`acme-dev` sont ceux par défaut (par exemple 10 instances, 20 vCPU, 50 Go de RAM, 100 réseaux… selon la configuration) ; la consommation montre le réseau et le groupe de sécurité de Chloé. `registered limit list` vide : le lab utilise les **quotas classiques** de chaque service, pas les limites unifiées.
+✅ **Observé** (18 octobre 2026) :
+
+| Commande | Résultat |
+|---|---|
+| `quota show --default` | Les défauts du cloud : `instances 10`, `cores 20`, `ram 51200` (Mo), `networks 100`, `subnets 100`, `ports 500`, `routers 10`, `floating-ips 50`, `secgroups 10`, `volumes 10`, `gigabytes 1000`… |
+| `quota show "$DEV"` | Les mêmes valeurs : rien n’a encore été fixé pour `acme-dev` |
+| `quota show --usage "$DEV"` | Colonnes `Limit`, `In Use`, `Reserved` ; on y voit le réseau (`networks`) et les groupes de sécurité (`secgroups`) de Chloé |
+| `grep … nova.conf` | Rien (`command terminated with exit code 1`) : Nova n’a pas de section `[quota]`, il garde ses défauts |
+| `registered limit list` | Vide : le lab utilise les **quotas classiques** de chaque service, pas les limites unifiées de Keystone |
+
+⚠ Dans la vue `--usage`, les lignes de Neutron (`networks`, `ports`…) affichent un dictionnaire `{'limit': …, 'reserved': …, 'in_use': …}` dans la colonne `Limit` : c’est un défaut d’affichage du client, les vraies valeurs sont dedans.
 
 ### 3.4.2 Fixer
 
 ```bash
-openstack quota set acme-dev --domain acme --instances 2 --cores 2 --ram 2048
-openstack quota set acme-dev --domain acme --networks 1 --subnets 2 --ports 10 --routers 1 --floating-ips 1 --secgroups 3
-openstack quota set acme-dev --domain acme --volumes 2 --gigabytes 20
-openstack quota show acme-dev --domain acme
+openstack quota set "$DEV" --instances 2 --cores 2 --ram 2048
+openstack quota set "$DEV" --networks 1 --subnets 2 --ports 10 --routers 1 --floating-ips 1 --secgroups 3
+openstack quota set "$DEV" --volumes 2 --gigabytes 20
+openstack quota show "$DEV" -f value | grep -E '^(instances|cores|ram|networks|subnets|ports|routers|floating-ips|secgroups|volumes|gigabytes) '
 ```
 
-✅ **Attendu :** les nouvelles valeurs, service par service (Nova, Neutron, Cinder).
-
-⚠ **Piège :** `openstack quota set` sans `--domain` cherche le projet par nom dans tous les domaines : ambigu dès que deux domaines ont un projet du même nom.
+✅ **Observé** (18 octobre 2026) : `cores 2`, `instances 2`, `ram 2048`, `networks 1`, `subnets 2`, `ports 10`, `routers 1`, `floating-ips 1`, `secgroups 3`, `volumes 2`, `gigabytes 20`. Une seule commande `quota set` règle les trois services (Nova, Neutron, Cinder) : le client répartit les options.
 
 ### 3.4.3 Simulation : le quota bloque
 
@@ -194,37 +216,39 @@ openstack quota show acme-dev --domain acme
 os_as chloe acme projet acme-dev acme -- network create acme-dev-net2
 ```
 
-⛔ **Refus attendu (409) :** `Quota exceeded for resources: ['network']`.
+⛔ **Observé :** `Error while executing command: ConflictException: 409, Quota exceeded for resources: ['network'].`
 
 **Instances :** on bloque toute instance en recette, sans rien consommer.
 
 ```bash
-openstack quota set acme-recette --domain acme --instances 0
+openstack quota set "$REC" --instances 0
 openstack role add --user emma --user-domain acme --project acme-recette --project-domain acme member
 os_as emma acme projet acme-recette acme -- server create lab-quota --flavor m1.tiny --image ubuntu --nic none
-```
-
-⛔ **Refus attendu (403) :** `Quota exceeded for instances: Requested 1, but already used 0 of 0 instances`. Le refus a lieu **avant** toute réservation : rien n’est créé.
-
-```bash
 os_as emma acme projet acme-recette acme -- server list
 ```
+
+⛔ **Observé :** `ForbiddenException: 403: … Quota exceeded for instances: Requested 1, but already used 0 of 0 instances`. Le refus a lieu **avant** toute réservation : `server list` est vide, rien n’a été créé.
+
+⚠ **Constaté en rejouant ce TP :** si le `quota set` a échoué (par exemple avec `--domain`), le quota reste celui par défaut, et la VM **est créée** (`BUILD`). Toujours vérifier la valeur avec `quota show` avant de tester le blocage. Si une VM `lab-quota` a été créée par erreur : `os_as emma acme projet acme-recette acme -- server delete lab-quota --wait`.
 
 **Le gestionnaire ne fixe pas les quotas :**
 
 ```bash
-os_as bruno acme domaine acme -- quota set acme-dev --domain acme --instances 50
+os_as bruno acme domaine acme -- quota set "$DEV" --instances 50
+openstack quota show "$DEV" -f value | grep -E '^instances '
 ```
 
-⛔ **Refus attendu (403) :** les quotas sont décidés par la plateforme, qui protège la capacité commune. Sur ce lab, Bruno n’est en pratique qu’un lecteur de son domaine (TP 2, § 2.4) : le refus est certain, quelle que soit la règle exacte de chaque service.
+⛔ **Observé :** `Programming error choosing an endpoint.`, puis `instances 2` : rien n’a changé. Bruno n’a qu’un jeton de **domaine** ; les quotas se règlent par projet, auprès de Nova, Neutron et Cinder, et son jeton ne lui permet même pas de les atteindre. Sur ce lab, Bruno n’est de toute façon qu’un lecteur de son domaine (TP 2, § 2.4) : les quotas restent à la plateforme, qui protège la capacité commune.
 
 ### 3.4.4 Les quotas par défaut
 
 ❓ **Question :** quel est le réglage le plus important pour protéger la plateforme ? *Réponse : les quotas **par défaut**, car ils s’appliquent à tout nouveau projet tant qu’on ne les a pas fixés explicitement.*
 
 ```bash
-openstack quota show --default -c instances -c cores -c ram
+openstack quota show --default -f value | grep -E '^(instances|cores|ram) '
 ```
+
+✅ **Observé :** `cores 20`, `instances 10`, `ram 51200`. (Le tableau de `quota show` n’a que deux colonnes, `Resource` et `Limit` : `-c instances` ne fonctionne pas, d’où le `grep`.)
 
 ⚠ **Piège :** `openstack quota set --class default …` change le défaut **de tous les projets** du cloud qui n’ont pas de valeur propre. À faire en connaissance de cause ; ne pas le lancer en TP sans revenir ensuite à la valeur initiale.
 

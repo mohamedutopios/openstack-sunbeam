@@ -1,6 +1,6 @@
 # TP 2 : les domaines
 
-> Statut : **pas encore rejoué sur le lab.** Relu et mis en cohérence avec le TP 1, rejoué le 17 octobre 2026 : sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Les résultats marqués « à confirmer » en sont déduits. Voir les conventions dans [README.md](README.md).
+> Statut : **rejoué sur le lab le 18 octobre 2026** (Keystone 2024.1, client `openstack` 7.5.0). Les résultats « Observé » sont ceux de ce jour. Sur ce lab, Keystone réserve la création de comptes, de projets et d’affectations au rôle `admin` (TP 1, § 1.6.2). Deux commandes ont dû être contournées par l’API à cause du client (`implied role create` sur un rôle de domaine, et l’affichage des refus de Bruno). Voir les conventions dans [README.md](README.md).
 
 **Module du support :** 9, les domaines dans OpenStack.
 **Durée :** 2 h.
@@ -47,7 +47,7 @@ openstack user list --domain partenaire
 openstack user show bruno
 ```
 
-⛔ **Refus attendu :** `More than one user exists with the name 'bruno'`. Un nom seul est ambigu.
+⛔ **Observé** (18 octobre 2026) : `No User found for bruno`. Le client cherche un compte nommé `bruno` dans le domaine **de ton jeton** (`admin_domain`), et n’en trouve pas. Un nom seul ne désigne pas un compte : selon le contexte, il ne trouve rien, ou il en trouve plusieurs (`More than one user exists with the name 'bruno'`).
 
 ```bash
 openstack user show bruno --domain acme -c id -c domain_id -c description
@@ -66,7 +66,7 @@ openstack project create app --domain partenaire
 openstack project create app --domain acme
 ```
 
-✅ **Attendu :** les deux premières réussissent. ⛔ **Refus attendu** pour la troisième : `409 Conflict`, le nom `app` existe déjà dans `acme`.
+✅ **Observé** (18 octobre 2026) : les deux premières réussissent. ⛔ La troisième est refusée : `Conflict occurred attempting to store project - it is not permitted to have two projects with either the same name or same id in the same domain: name is app … (HTTP 409)`.
 
 ```bash
 openstack project delete app --domain acme
@@ -89,10 +89,17 @@ openstack role list --domain acme
 
 ❓ **Question :** un rôle propre au domaine sert à quoi, s’il n’est pas utilisé par les politiques des services ? *Réponse : un rôle propre au domaine n’est jamais vu par les services : il doit **impliquer** un rôle global (ex. `acme-facturation` implique `reader`) pour donner un droit. Il sert à nommer un profil métier propre au domaine.*
 
+⚠ **Piège du client :** `openstack implied role create acme-facturation --implied-role reader` échoue avec le client 7.5.0 : `Could not find role: None. (HTTP 404)`, même en donnant l’identifiant du rôle. Le client ne sait pas retrouver un rôle **propre à un domaine** et envoie `PUT /v3/roles/None/implies/…` (constaté le 18 octobre 2026 dans le journal de Keystone). On passe donc par l’API :
+
 ```bash
-openstack implied role create acme-facturation --implied-role reader
+FACT=$(openstack role show acme-facturation --domain acme -f value -c id)
+READER=$(openstack role show reader -f value -c id)
+T=$(openstack token issue -f value -c id)
+curl -s -o /dev/null -w "implication : %{http_code}\n" -X PUT "$OS_AUTH_URL/roles/$FACT/implies/$READER" -H "X-Auth-Token: $T"
 openstack implied role list
 ```
+
+✅ **Observé :** `implication : 201`, puis une ligne `acme-facturation → reader` dans `implied role list`, à côté de la chaîne `admin → manager → member → reader`.
 
 ---
 
@@ -102,10 +109,10 @@ L’équipe plateforme (`admin`, projet `admin` du domaine `admin_domain`) voit 
 
 ```bash
 openstack project list --long
-openstack user list --long | grep -E "acme|partenaire"
+for d in acme partenaire; do openstack user list --domain "$d" --long; done
 ```
 
-✅ **Attendu :** les objets d’`acme` et de `partenaire` sont visibles.
+✅ **Observé** (18 octobre 2026) : l’administrateur voit les comptes des deux domaines (un `bruno` dans chacun). ⚠ Ne pas écrire `openstack user list --long | grep acme` : sans `--domain`, la liste ne contient que les comptes du domaine du jeton (`admin_domain`), et le `grep` ne trouve rien (TP 1, § 1.2).
 
 ### Le piège du rôle `admin`
 
@@ -119,7 +126,7 @@ os_as bruno acme projet acme-si acme -- project list --domain admin_domain
 openstack role remove --user bruno --user-domain acme --project acme-si --project-domain acme admin
 ```
 
-✅ **Attendu sur ce lab** (déduit des règles lues au TP 1, § 1.6.2 ; à confirmer en jouant le TP) : les deux commandes de Bruno **réussissent**. Les règles `identity:list_users` et `identity:list_projects` commencent par `rule:admin_required`, qui accepte un rôle `admin` **quelle que soit sa cible** : Bruno, `admin` d’un simple projet d’Acme, voit les comptes du partenaire et les projets de la plateforme. C’est la démonstration de « admin quelque part, admin partout ». On retire tout de suite ce rôle.
+✅ **Observé** (18 octobre 2026) : les deux commandes de Bruno **réussissent** : il voit le `bruno` du partenaire et le projet `admin` de la plateforme. Les règles `identity:list_users` et `identity:list_projects` commencent par `rule:admin_required`, qui accepte un rôle `admin` **quelle que soit sa cible** : Bruno, `admin` d’un simple projet d’Acme, voit les comptes du partenaire et les projets de la plateforme. C’est la démonstration de « admin quelque part, admin partout ». On retire tout de suite ce rôle.
 
 ⚠ **Piège :** ne jamais donner `admin` à un client ou à un gestionnaire de domaine. Le rôle prévu pour déléguer est `manager` sur le domaine (§ 2.4) ; on va voir ce qu’il permet réellement sur ce lab.
 
@@ -156,14 +163,14 @@ os_as bruno acme domaine acme -- project create acme-dev --domain acme --parent 
 os_as bruno acme domaine acme -- role assignment list --domain acme --names
 ```
 
-✅ **Attendu sur ce lab** (déduit des règles lues au TP 1, § 1.6.2 ; à confirmer) :
+✅ **Observé** (18 octobre 2026) :
 
-| Commande | Résultat attendu | Règle en cause |
+| Commande | Résultat | Règle en cause |
 |---|---|---|
-| `user list --domain acme` | ✅ réussit | `list_users` accepte `reader` sur le domaine visé ; `manager` implique `reader` |
-| `user create chloe` | ⛔ `403` | `identity:create_user` = `rule:admin_required` : **seulement** `admin` |
-| `project create acme-dev` | ⛔ `403` | `identity:create_project` = `rule:admin_required` |
-| `role assignment list --domain acme` | à relever | Règle non lue au TP 1 : `oslopolicy-policy-generator … \| grep list_role_assignments` |
+| `user list --domain acme` | ✅ réussit (Bruno ne voit que lui-même, seul compte d’Acme à ce stade) | `list_users` accepte `reader` sur le domaine visé ; `manager` implique `reader` |
+| `user create chloe` | ⛔ `403 … identity:create_user` | `identity:create_user` = `rule:admin_required` : **seulement** `admin` |
+| `project create acme-dev` | ⛔ `403 … identity:create_project` | `identity:create_project` = `rule:admin_required` |
+| `role assignment list --domain acme` | ✅ réussit : `manager bruno@acme` sur `acme` | La lecture des affectations de son domaine est permise |
 
 **Conclusion à faire tirer aux apprenants :** sur ce Keystone, aucune règle ne mentionne `manager` (TP 1, § 1.6.2). Un gestionnaire de domaine y est, en pratique, un **lecteur** de son domaine. La délégation de la gestion des identités n’est pas possible telle quelle :
 
@@ -190,7 +197,7 @@ openstack role assignment list --project acme-dev --project-domain acme --names
 
 Les `show … || create` évitent une erreur si un compte ou le projet existe déjà, par exemple si la création par Bruno a finalement réussi sur ton lab.
 
-✅ **Attendu :** les trois comptes dans `acme`, le projet `acme-dev` sous `acme-si`, et `chloe@acme` → `member` sur `acme-dev`.
+✅ **Observé** (18 octobre 2026) : les trois comptes dans `acme`, le projet `acme-dev` sous `acme-si` (`parent_id` = l’identifiant d’`acme-si`), et `chloe@acme` → `member` sur `acme-dev`. `role assignment list --domain acme` ne montre que `manager bruno@acme` : l’affectation de Chloé porte sur un **projet**, pas sur le domaine ; elle apparaît avec `--project acme-dev`.
 
 ### Ce que Bruno ne doit pas pouvoir faire
 
@@ -203,7 +210,40 @@ os_as bruno acme domaine acme -- domain create acme2
 os_as bruno acme domaine acme -- hypervisor list
 ```
 
-⛔ **Refus attendu (403)** pour chacune (déduit des règles du TP 1 ; à confirmer) :
+⛔ **Observé** (18 octobre 2026) : tout est refusé, mais **le client `openstack` 7.5.0 ne l’affiche pas toujours clairement** :
+
+| Tentative | Ce qu’affiche le client | Ce qu’a fait Keystone |
+|---|---|---|
+| Lister les comptes du partenaire | `'NoneType' object has no attribute 'id'` | Bruno n’a pas le droit de lire le domaine `partenaire` (`identity:get_domain` refusé) : le client ne trouve pas son identifiant et plante |
+| Créer un compte chez le partenaire | `No Domain found for partenaire` | Même cause |
+| Donner `admin` à Chloé, ou à lui-même | **rien**, et code de sortie `0` | Refus `403 identity:create_grant` (journal de Keystone). **Aucune affectation créée** |
+| Créer un domaine | `You are not authorized to perform the requested action: identity:create_domain. (HTTP 403)` | Refus |
+| Lister les hyperviseurs | `403 … Policy doesn't allow os_compute_api:os-hypervisors:list-detail to be performed.` | Refus de Nova |
+
+⚠ **Piège du client : un `role add` refusé ne dit rien.** Bruno ne peut pas lire les rôles : le client ne traduit pas le nom `admin` en identifiant, envoie la demande quand même, reçoit `404` ou `403`, et se tait. On croirait que l’affectation a réussi. **Toujours vérifier** :
+
+```bash
+openstack role assignment list --role admin --names | grep -E "acme|partenaire" || echo "aucun admin chez Acme ou le partenaire"
+```
+
+✅ **Observé :** `aucun admin chez Acme ou le partenaire`.
+
+Pour **voir** les refus, on appelle l’API avec le jeton de Bruno :
+
+```bash
+TB=$(os_as bruno acme domaine acme -- token issue -f value -c id)
+ADMIN_ROLE=$(openstack role show admin -f value -c id)
+CHLOE=$(openstack user show chloe --domain acme -f value -c id)
+DEV=$(openstack project show acme-dev --domain acme -f value -c id)
+PART=$(openstack domain show partenaire -f value -c id)
+curl -s -w "\n%{http_code}\n" -X PUT "$OS_AUTH_URL/projects/$DEV/users/$CHLOE/roles/$ADMIN_ROLE" -H "X-Auth-Token: $TB"
+curl -s "$OS_AUTH_URL/users?domain_id=$PART" -H "X-Auth-Token: $TB"; echo
+```
+
+✅ **Observé :**
+
+- `{"error": {"code": 403, … "You are not authorized to perform the requested action: identity:create_grant." …}}` puis `403` : Bruno ne peut pas fabriquer d’administrateur ;
+- `{"users": [], …}` : pour les comptes du partenaire, Keystone ne refuse pas, il renvoie une liste **vide**. Il filtre sur le domaine de Bruno : les deux domaines restent étanches.
 
 | Tentative | Pourquoi c’est refusé |
 |---|---|
@@ -228,7 +268,7 @@ os_as bruno partenaire domaine partenaire -- user list --domain acme
 
 Le projet `partenaire-app` est créé par la plateforme, pour la raison vue plus haut.
 
-✅ **Attendu** (à confirmer) : le Bruno du partenaire **voit** son domaine (`project list --domain partenaire`). ⛔ **Refus attendu (403)** sur la liste des comptes d’Acme. Deux gestionnaires homonymes, deux périmètres de lecture étanches.
+✅ **Observé** (18 octobre 2026) : le Bruno du partenaire **voit** son domaine (`partenaire-app`). ⛔ Sur la liste des comptes d’Acme, le client plante (`'NoneType' object has no attribute 'id'`) : comme plus haut, Bruno ne peut pas lire le domaine `acme`. Deux gestionnaires homonymes, deux périmètres de lecture étanches.
 
 ---
 
@@ -262,7 +302,7 @@ openstack domain set --enable partenaire
 os_as bruno partenaire domaine partenaire -- token issue -c expires
 ```
 
-⛔ **Refus attendu (401)** pendant que le domaine est désactivé : aucun de ses comptes ne peut s’authentifier. ✅ **Attendu** après réactivation : le jeton est de nouveau délivré.
+⛔ **Observé** (18 octobre 2026) pendant que le domaine est désactivé : `The request you have made requires authentication. (HTTP 401)` : aucun de ses comptes ne peut s’authentifier. ✅ Après réactivation, le jeton est de nouveau délivré.
 
 ### Simulation : supprimer un domaine (sur un domaine jetable)
 
@@ -273,15 +313,16 @@ openstack project create jetable --domain lab-ephemere
 openstack domain delete lab-ephemere
 ```
 
-⛔ **Refus attendu :** un domaine actif ne se supprime pas (`403` ou `400` « Cannot delete a domain that is enabled »).
+⛔ **Observé** (18 octobre 2026) : `Cannot delete a domain that is enabled, please disable it first. (HTTP 403)`.
 
 ```bash
+JETABLE=$(openstack user show jetable --domain lab-ephemere -f value -c id)
 openstack domain set --disable lab-ephemere
 openstack domain delete lab-ephemere
-openstack user list --long | grep -c jetable
+openstack user show "$JETABLE"
 ```
 
-✅ **Attendu :** suppression réussie ; `0` : **les utilisateurs, groupes et projets du domaine disparaissent avec lui**.
+✅ **Attendu :** suppression réussie, puis `No User found for …` : **les utilisateurs, groupes et projets du domaine disparaissent avec lui**. On garde l’identifiant du compte **avant** la suppression : après, son domaine n’existe plus, on ne peut plus le chercher par nom. (Un `openstack user list | grep jetable` ne prouverait rien : sans `--domain`, la liste ne contient que les comptes d’`admin_domain`.)
 
 ⚠ **Piège :** les ressources (VM, volumes, réseaux) des projets supprimés ne sont **pas** supprimées : elles deviennent orphelines. Avant de supprimer un domaine, vider ses projets.
 
@@ -296,6 +337,8 @@ Depuis Windows, ouvre `http://cloud.lab.test/openstack-horizon` et connecte-toi 
 | Domaine | `acme` |
 | Utilisateur | `bruno` |
 | Mot de passe | `LAB_PW` |
+
+La page de connexion de Horizon a bien un champ **Domaine** (constaté le 18 octobre 2026 : champs `domain`, `username`, `password`) : Horizon est configuré pour plusieurs domaines.
 
 ❓ **Question :** Bruno voit-il le menu **Identité** ? Quels domaines voit-il ? *Attendu : il voit le menu Identité restreint à son domaine (selon la version d’Horizon et les politiques). Comparer avec une connexion de `demo` (domaine `users`).*
 

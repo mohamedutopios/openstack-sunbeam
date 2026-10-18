@@ -111,10 +111,14 @@ lab-globex (domaine)
 ### Phase 3 : la plateforme fixe les quotas (compte `admin`)
 
 ```bash
-openstack quota set globex-dev --domain lab-globex --instances 2 --cores 2 --ram 4096 --networks 2
-openstack quota set globex-prod --domain lab-globex --instances 5 --cores 10 --ram 20480 --networks 3
-openstack quota show globex-dev --domain lab-globex -c instances -c cores -c ram -c networks
+GDEV=$(openstack project show globex-dev --domain lab-globex -f value -c id)
+GPROD=$(openstack project show globex-prod --domain lab-globex -f value -c id)
+openstack quota set "$GDEV" --instances 2 --cores 2 --ram 4096 --networks 2
+openstack quota set "$GPROD" --instances 5 --cores 10 --ram 20480 --networks 3
+openstack quota show "$GDEV" -f value | grep -E "^(instances|cores|ram|networks) "
 ```
+
+`quota show` et `quota set` n’acceptent pas `--domain` (client 7.5.0) : on désigne chaque projet par son identifiant (TP 3, § 3.4).
 
 ❓ **Question :** pourquoi pas Gaëlle ? *Réponse : les quotas protègent la capacité commune de la plateforme ; un client ne fixe pas lui-même sa part.*
 
@@ -159,7 +163,7 @@ Les apprenants vérifient chaque exigence du cahier des charges par une commande
 | 5 | Jules lit tout, ne modifie rien | `os_as jules lab-globex projet globex-dev lab-globex -- network create globex-intrus` | ⛔ 403 |
 | 6 | Aucune affectation directe d’une personne sur un projet | `openstack role assignment list --domain lab-globex --names` puis, pour chaque projet, `openstack role assignment list --project <p> --project-domain lab-globex --names` | seulement des groupes |
 | 7 | Aucun `admin` chez Globex | `openstack role assignment list --role admin --names --effective \| grep -c globex` | `0` |
-| 8 | Quotas conformes | `openstack quota show globex-dev --domain lab-globex` | 2 / 2 / 4096 / 2 |
+| 8 | Quotas conformes | `openstack quota show "$GDEV"` | `instances` 2, `cores` 2, `ram` 4096, `networks` 2 |
 | 9 | Le compte de supervision ne fait que lire | `os_appcred "$AC_ID" "$AC_SECRET" -- network create globex-intrus` | ⛔ 403 |
 | 10 | Il expire sous 30 jours | `os_as ines lab-globex projet globex-prod lab-globex -- application credential show globex-supervision -c expires_at` | date à J+30 |
 
@@ -185,7 +189,7 @@ Le formateur injecte un incident à la fois, **sans dire lequel**. L’apprenant
 |---|---|---|
 | I1 | « Hugo ne peut plus se connecter du tout. » | `openstack user set --disable hugo --domain lab-globex` |
 | I2 | « Inès ne peut plus créer de réseau en production, alors qu’hier elle pouvait. » | `openstack role remove --group globex-ops --group-domain lab-globex --project globex-prod --project-domain lab-globex member` puis `openstack role add --group globex-ops --group-domain lab-globex --project globex-prod --project-domain lab-globex reader` |
-| I3 | « Hugo ne peut plus créer de deuxième réseau en développement. » | `openstack quota set globex-dev --domain lab-globex --networks 1` |
+| I3 | « Hugo ne peut plus créer de deuxième réseau en développement. » | `openstack quota set "$GDEV" --networks 1` |
 | I4 | « Plus personne chez Globex ne peut se connecter. » | `openstack domain set --disable lab-globex` |
 | I5 | « L’audit trouve un administrateur chez Globex. » | `openstack role add --user jules --user-domain lab-globex --project globex-si --project-domain lab-globex admin` |
 | I6 | « Le script de supervision échoue avec une erreur d’authentification. » | `openstack role remove --group globex-ops --group-domain lab-globex --project globex-prod --project-domain lab-globex member` |
@@ -196,7 +200,7 @@ Le formateur injecte un incident à la fois, **sans dire lequel**. L’apprenant
 1. **Reproduire** avec le compte concerné (`os_as …`), et lire le code : `401` (identité) ou `403` (autorisation) ou `409`/`413` (quota, conflit).
 2. **Identité** : `openstack user show <u> --domain lab-globex -c enabled`, `openstack domain show lab-globex -c enabled`.
 3. **Droits effectifs** : `openstack role assignment list --user <u> --user-domain lab-globex --names --effective`.
-4. **Quotas** : `openstack quota show --usage <projet> --domain lab-globex`.
+4. **Quotas** : `openstack quota show --usage <id du projet>` (identifiant : `openstack project show <projet> --domain lab-globex -f value -c id`).
 5. **Journaux** : identifiant de requête (`--debug`), puis `sudo k8s kubectl -n openstack logs keystone-0 -c keystone --since=5m`.
 
 ### Fiche formateur : solutions
@@ -205,7 +209,7 @@ Le formateur injecte un incident à la fois, **sans dire lequel**. L’apprenant
 |---|---|---|
 | I1 | `401` ; `user show` : `enabled = False` | `openstack user set --enable hugo --domain lab-globex` |
 | I2 | `403` ; droits effectifs : `reader` seulement sur `globex-prod` | rétablir `member` pour le groupe, retirer `reader` |
-| I3 | `409 Quota exceeded` ; `quota show --usage` : 1 réseau utilisé sur 1 | `openstack quota set globex-dev --domain lab-globex --networks 2` |
+| I3 | `409 Quota exceeded` ; `quota show --usage` : 1 réseau utilisé sur 1 | `openstack quota set "$GDEV" --networks 2` |
 | I4 | `401` pour tous ; `domain show` : `enabled = False` | `openstack domain set --enable lab-globex` |
 | I5 | `role assignment list --role admin --effective` montre `jules` sur `globex-si` | retirer l’affectation ; rappeler pourquoi `admin` déborde de sa cible |
 | I6 | `401` avec l’identifiant d’application ; Inès n’a plus de rôle sur `globex-prod` | rétablir `member` pour le groupe ; l’identifiant d’application suit les droits de son propriétaire |
