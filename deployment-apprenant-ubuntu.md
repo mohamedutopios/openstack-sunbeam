@@ -37,12 +37,14 @@ ca.crt
 
 | Ressource | Valeur |
 |---|---|
-| Système | Ubuntu 24.04 LTS, bureau (pour le navigateur) |
+| Système | Ubuntu 24.04 LTS, bureau (pour le navigateur), **installé directement sur le PC** |
 | Architecture | **Intel** x86-64 (AMD : prévenir le formateur, voir étape 10.3) |
-| RAM | 32 Go minimum |
-| Processeurs | 12 threads ou plus conseillés (les VM en utilisent 10) |
+| RAM | **48 Go conseillés**, 32 Go au strict minimum |
+| Processeurs | 16 threads ou plus conseillés |
 | Stockage | SSD, environ 300 Go libres |
 | Virtualisation | Intel VT-x activé dans l’UEFI/BIOS |
+
+**Pourquoi autant de mémoire :** les deux VM réservent ensemble environ **28 Go** (Lab-Sunbeam 23 675 Mo, Lab-Services 5 056 Mo, réglages des OVA d’octobre 2026). Sur un hôte de 32 Go, il ne reste presque rien pour Ubuntu et le navigateur : constaté sur le PC Windows de référence, avec 0,1 à 0,6 Go libres, une charge très élevée et des pannes aléatoires du cloud. Les VM déclarent aussi 17 processeurs virtuels (12 + 5) : VirtualBox accepte d’en donner plus que l’hôte n’a de threads, mais tout ralentit.
 
 ```bash
 nproc
@@ -55,7 +57,17 @@ grep -c vmx /proc/cpuinfo
 
 ### Hôte Ubuntu qui est lui-même une VM
 
-Si ta machine Ubuntu est une VM (VMware, Proxmox, Hyper-V, cloud…), l’hyperviseur qui l’héberge doit exposer **VT-x imbriqué** (`grep -c vmx` > 0). Les instances Nova tournent alors sur **trois niveaux** de virtualisation : le lab peut démarrer, mais les instances seront lentes et ce montage n’est pas validé. Préfère un Ubuntu installé directement sur le PC.
+**À éviter.** Ce guide suppose un Ubuntu installé **directement** sur le PC physique, avec VirtualBox dans cet Ubuntu.
+
+Si Ubuntu est lui-même une VM (dans VirtualBox, VMware, Proxmox, Hyper-V, un cloud…), la chaîne devient : PC physique → hyperviseur → Ubuntu → VirtualBox → Lab-Sunbeam → KVM → instances Nova. Les instances tournent alors sur **trois niveaux** de virtualisation imbriquée :
+
+| Niveau | Ce qu’il exige |
+|---|---|
+| 1. Hyperviseur du PC → Ubuntu | Exposer VT-x à la VM Ubuntu (`grep -c vmx` > 0 dans Ubuntu) |
+| 2. VirtualBox dans Ubuntu → Lab-Sunbeam | Que VirtualBox accepte de tourner dans une VM, et y propose encore « VT-x/AMD-V imbriqué » |
+| 3. KVM dans Lab-Sunbeam → instances | Que `/dev/kvm` existe dans Lab-Sunbeam |
+
+Ce montage **n’a pas été validé**. Même en partie fonctionnel, il serait très lent : le PC de référence, avec seulement deux niveaux (Windows → VirtualBox → KVM), montait déjà à une charge de 30 à 70 pendant certaines opérations. Et il faudrait une VM Ubuntu d’au moins 48 Go de RAM. **Installe Ubuntu sur le disque du PC** (disque dédié ou double démarrage).
 
 Vérifie aussi que les réseaux `192.168.56.0/24` et `192.168.57.0/24` ne sont pas déjà utilisés par l’hôte :
 
@@ -177,10 +189,28 @@ Si les MAC diffèrent, supprime la VM (**Supprimer → Supprimer tous les fichie
 
 VM **Lab-Sunbeam éteinte** : **Configuration → Système**.
 
-1. Onglet **Carte mère** : vérifie **20480 Mo** de mémoire vive.
-2. Onglet **Processeur** : vérifie **8** processeurs et coche **Activer VT-x/AMD-V imbriqué**.
+1. Onglet **Carte mère** : vérifie la mémoire vive, **23 675 Mo** dans les OVA d’octobre 2026. Ne descends pas sous 20 Go : Kubernetes, Ceph et les services OpenStack en utilisent déjà une douzaine au repos, et chaque instance prend la sienne en plus.
+2. Onglet **Processeur** : vérifie le nombre de processeurs, **12** dans ces OVA, et coche **Activer VT-x/AMD-V imbriqué**. Si l’hôte a moins de 16 threads, tu peux descendre à 8.
+
+Pour Lab-Services, laisse les réglages de l’OVA (5 056 Mo, 5 processeurs).
 
 ## 8. Démarrer les VM
+
+### 8.0 Empêcher la mise en veille de l’hôte
+
+Une mise en veille de l’hôte fige les deux VM. À leur réveil, leur horloge a sauté et la charge explose : constaté sur le lab de référence le 17 octobre (1 h 31 de figeage), avec des `503` aléatoires pendant longtemps. Le 18 octobre, Lab-Services est même restée bloquée (`rcu_preempt detected expedited stalls` en boucle sur sa console).
+
+Pendant toute la durée de la formation, désactive la mise en veille :
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
+
+**Pourquoi `mask` :** la mise en veille d’Ubuntu passe par ces cibles de `systemd` ; les masquer les rend impossibles à atteindre, quelle que soit la cause (inactivité, couvercle fermé, menu). Pour revenir en arrière après la formation :
+
+```bash
+sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
 
 ### 8.1 Lab-Services d’abord
 
@@ -488,6 +518,12 @@ Pour reprendre : **Services d’abord, Sunbeam ensuite**, puis attends 10 à 15 
 
 Après la première validation complète, crée un snapshot des **deux VM éteintes** : sélectionne la VM, bouton de menu à droite de son nom → **Instantanés** → **Prendre**, nommé par exemple `Base-importee-validee`. Pour revenir à cette base, restaure l’instantané des **deux** VM, éteintes.
 
+⚠ **Jamais d’instantané VM allumée.** Essayé sur Lab-Services le 18 octobre : l’instantané « à chaud » est resté bloqué à 90 % pendant des heures (état `livesnapshotting`), sans jamais être enregistré. Un instantané à chaud copie la mémoire pendant que la VM continue d’écrire ; sur un hôte à court de mémoire, la copie ne rattrape jamais la VM. VM éteinte, l’instantané prend quelques secondes.
+
+**Restaurer :** VM éteinte, dans la liste des instantanés, clique sur la **ligne de l’instantané** (pas sur « État actuel »), puis **Restaurer**, et décoche « Créer un instantané de l’état actuel ».
+
+**Si une VM ne répond plus du tout** (ping possible, SSH muet, console figée) : **Machine → Fermer → Éteindre la machine**, puis **Démarrer**. *Réinitialiser* n’a pas suffi sur Lab-Services le 18 octobre : son noyau bloqué a continué après la réinitialisation.
+
 ---
 
 ## Dépannage rapide
@@ -509,3 +545,6 @@ Après la première validation complète, crée un snapshot des **deux VM étein
 | Instance : ping Internet OK, `apt`/HTTPS bloqués | MTU de `provider0` à 1500 | 10.4 |
 | `juju status -m openstack-machines` : `not found` | Nom du modèle | `admin/openstack-machines` |
 | Certificat Keycloak refusé dans le navigateur | CA non importée dans le navigateur | 9 |
+| `503 … Keystone service is temporarily unavailable` partout, après une pause | Hôte mis en veille, ou Lab-Services figée | 8.0 ; Lab-Services : 13 (« Si une VM ne répond plus ») |
+| Tout est très lent, charge énorme dans Lab-Sunbeam (`uptime`) | Hôte à court de mémoire | 1 (RAM) : fermer les applications, ou plus de RAM |
+| Instantané bloqué (`livesnapshotting`) | Instantané pris VM allumée | 13 |

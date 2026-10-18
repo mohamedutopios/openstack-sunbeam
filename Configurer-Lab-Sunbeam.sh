@@ -100,6 +100,25 @@ for name in "${names[@]}"; do
 done
 
 echo
+echo "Reseaux host-only de VirtualBox sur l'hote :"
+for ip in 192.168.56.1 192.168.57.1; do
+    iface=$(ip -br -4 addr | awk -v ip="$ip/24" '$0 ~ ip {print $1; exit}')
+    if [ -n "$iface" ]; then
+        echo "OK : $ip sur $iface"
+    else
+        echo "AVERTISSEMENT : aucune interface en $ip. Creer le reseau host-only (etape 4), puis demarrer une VM qui l'utilise."
+    fi
+done
+
+echo
+echo "Mise en veille de l'hote :"
+if [ "$(systemctl is-enabled suspend.target 2>/dev/null)" = "masked" ]; then
+    echo "OK : mise en veille desactivee."
+else
+    echo "AVERTISSEMENT : la mise en veille est possible ; elle fige les VM (etape 8.0)."
+fi
+
+echo
 echo "Tests TCP (les VM doivent etre demarrees) :"
 check_port() {
     if timeout 3 bash -c "</dev/tcp/$2/$3" 2>/dev/null; then
