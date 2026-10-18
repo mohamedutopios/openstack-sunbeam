@@ -142,6 +142,8 @@ os_appcred "$AC_ID" "$AC_SECRET" -- server list
 
 ✅ **Attendu :** la liste (vide) des instances de `globex-prod`, sans mot de passe.
 
+⚠ L’identifiant ne reçoit que les rôles **nommés** à sa création, pas les rôles impliqués (TP 4, § 4.5.2) : `--role reader` est donc indispensable ici, même si Inès a `member`, qui implique `reader`.
+
 ---
 
 ## Partie C : l’audit de conformité

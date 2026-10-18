@@ -252,6 +252,8 @@ APPCRED_SECRET=$(python3 -c "import json; print(json.load(open('/tmp/appcred.jso
 
 ✅ **Attendu :** un identifiant, le rôle `reader` seul, une date d’expiration, `unrestricted = False`. ⚠ **Piège :** le **secret** n’est affiché qu’une fois, à la création ; Keystone n’en garde qu’une empreinte.
 
+⚠ **Piège : un identifiant d’application ne reçoit que les rôles nommés à sa création.** Les rôles **impliqués** ne suivent pas. Constaté sur le lab le 18 octobre 2026 (`6-securite/04-rotation-secrets.md`, § 4.7) : bien que `member` implique `reader` (`openstack implied role list`), un identifiant créé avec `--role member` seul ne voyait pas les réseaux du projet ; avec `--role member --role reader`, il les voyait. Ici, on nomme `reader` explicitement : le script lit sans problème. Pour un script qui doit aussi créer, nommer **les deux** rôles.
+
 Le script utilise l’identifiant d’application :
 
 ```bash
@@ -337,11 +339,22 @@ openstack role assignment list --project acme-prod --project-domain acme --names
 
 ### Identifiants d’application d’un domaine
 
+⚠ **Piège du client :** `openstack application credential list --user <compte>` échoue avec le client 7.5.0 du lab (`'function' object has no attribute 'list'`, constaté le 18 octobre 2026). On interroge donc directement l’API de Keystone, avec le jeton de l’administrateur :
+
 ```bash
+T=$(openstack token issue -f value -c id)
+K=$(openstack endpoint list --service identity --interface public -f value -c URL)
 for u in $(openstack user list --domain acme -f value -c ID); do
-  openstack application credential list --user "$u" -f value -c Name -c "Expires At" | sed "s/^/$(openstack user show "$u" -f value -c name) : /"
+  name=$(openstack user show "$u" -f value -c name)
+  curl -s ${OS_CACERT:+--cacert "$OS_CACERT"} -H "X-Auth-Token: $T" "$K/users/$u/application_credentials" \
+    | python3 -c 'import sys,json; [print(sys.argv[1], ":", a["name"], "expire", a["expires_at"]) for a in json.load(sys.stdin)["application_credentials"]]' "$name"
 done
+openstack token revoke "$T"
 ```
+
+**La commande, mot par mot :** `T` est un jeton administrateur, `K` l’adresse de Keystone lue dans le catalogue ; pour chaque compte d’`acme`, l’API `GET /v3/users/<id>/application_credentials` liste ses identifiants, dont le programme Python affiche le nom et l’expiration ; `${OS_CACERT:+--cacert …}` n’ajoute la CA que si le cloud est en HTTPS ; le jeton est révoqué à la fin.
+
+✅ **Attendu** (à confirmer) : une ligne par identifiant encore présent, par exemple `emma : lab-sauvegarde expire …` si le § 4.5.5 n’a pas été joué ; aucune ligne s’il l’a été.
 
 ### Exercice : la revue des droits
 

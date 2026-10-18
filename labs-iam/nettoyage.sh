@@ -32,12 +32,9 @@ fi
 for d in $DOMAINS; do
     case " $PROTECTED_DOMAINS " in *" $d "*) continue ;; esac
     openstack domain show "$d" >/dev/null 2>&1 || continue
-    # Identifiants d'application des utilisateurs du domaine.
-    for u in $(openstack user list --domain "$d" -f value -c ID); do
-        for ac in $(openstack application credential list --user "$u" -f value -c ID 2>/dev/null); do
-            openstack application credential delete --user "$u" "$ac" && echo "identifiant d'application $ac supprime"
-        done
-    done
+    # Identifiants d'application : supprimes par Keystone avec leur proprietaire (plus bas).
+    # Ne pas utiliser "application credential list --user" : le client 7.5.0 echoue
+    # ('function' object has no attribute 'list'), constate le 18 octobre 2026.
     # Projets : les feuilles d'abord (un projet parent ne se supprime pas avant ses enfants).
     for _ in 1 2 3 4 5; do
         remaining=$(openstack project list --domain "$d" -f value -c ID)
