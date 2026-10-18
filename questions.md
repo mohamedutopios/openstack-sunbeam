@@ -20,3 +20,7 @@ Stockage Ceph	Disques, mémoire par OSD, réseau -> OSD ?
 Neutron	Placement	Déclarer la bande passante garantie (QoS) et les segments de réseaux routés ??
 
 oslo.messaging
+
+ovn-contoller ?
+
+MAAS ?
