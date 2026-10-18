@@ -22,7 +22,8 @@ LAB_PROJECTS=$(openstack project list -f value -c Name | grep -E '^lab-' || true
 for p in $LAB_PROJECTS; do echo " - projet $p"; done
 LAB_USERS=$(openstack user list --domain admin_domain -f value -c Name | grep -E '^lab-' || true)
 for u in $LAB_USERS; do echo " - utilisateur $u (admin_domain)"; done
-echo "Pense a supprimer d'abord les ressources (VM, volumes, reseaux) des projets : elles survivraient a leur projet."
+echo "Les reseaux et groupes de securite des projets sont supprimes avec eux."
+echo "Supprime d'abord a la main les VM et les volumes eventuels : ils survivraient a leur projet."
 
 if [ "${1:-}" != "-y" ]; then
     read -r -p "Confirmer la suppression ? (oui/non) " answer
@@ -32,6 +33,17 @@ fi
 for d in $DOMAINS; do
     case " $PROTECTED_DOMAINS " in *" $d "*) continue ;; esac
     openstack domain show "$d" >/dev/null 2>&1 || continue
+    # Ressources reseau des projets : elles survivraient a leur projet (orphelines).
+    # Constate le 18 octobre 2026 : sans cette boucle, acme-dev-net, acme-dev-web et les groupes
+    # "default" des projets supprimes restaient dans Neutron.
+    for p in $(openstack project list --domain "$d" -f value -c ID); do
+        for n in $(openstack network list --project "$p" -f value -c ID); do
+            openstack network delete "$n" && echo "reseau $n supprime"
+        done
+        for sg in $(openstack security group list --project "$p" -f value -c ID); do
+            openstack security group delete "$sg" && echo "groupe de securite $sg supprime"
+        done
+    done
     # Identifiants d'application : supprimes par Keystone avec leur proprietaire (plus bas).
     # Ne pas utiliser "application credential list --user" : le client 7.5.0 echoue
     # ('function' object has no attribute 'list'), constate le 18 octobre 2026.
@@ -62,6 +74,8 @@ for r in $CUSTOM_ROLES; do
     openstack role delete "$r" && echo "role $r supprime"
 done
 for p in $LAB_PROJECTS; do
+    # Deja supprime s'il appartenait a un domaine lab-* traite plus haut.
+    openstack project show "$p" >/dev/null 2>&1 || continue
     openstack project delete "$p" && echo "projet $p supprime"
 done
 for u in $LAB_USERS; do
