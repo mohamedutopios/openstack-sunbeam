@@ -60,7 +60,7 @@ ovn-relay/0                      never    8
 | `never` | Le charm ne renouvelle pas ce secret de lui-même |
 | `daily`, `monthly` | Le charm le renouvelle à cette fréquence ; Juju le réveille à l’échéance |
 
-Le seul propriétaire qui fait tourner ses secrets est **`keystone`**. Le `<model>` est le secret de la paire de clés SAML (démo 2, étape 2.4). Le nombre total varie avec les fonctionnalités activées.
+Le seul propriétaire qui fait tourner ses secrets est **`keystone`**. Le `<model>` est le secret de la paire de clés SAML (démo 2, étape 2). Le nombre total varie avec les fonctionnalités activées.
 
 Le détail des secrets de Keystone, **sans** leur contenu :
 
@@ -265,7 +265,7 @@ sunbeam openrc > ~/admin-openrc
 
 ## 4.7 Les identifiants d’application : la rotation côté utilisateur
 
-**À quoi ça sert :** les scripts des utilisateurs utilisent des identifiants d’application (démo 2, étape 2.10). Leur rotation est simple, et sans interruption : on crée le nouveau **avant** de supprimer l’ancien.
+**À quoi ça sert :** les scripts des utilisateurs utilisent des identifiants d’application (démo 2, étape 10). Leur rotation est simple, et sans interruption : on crée le nouveau **avant** de supprimer l’ancien.
 
 ```bash
 source ~/demo-openrc

@@ -38,7 +38,7 @@ C’est la question décisive de la démo. Il y a **trois** sortes de comptes :
 
 ## 3.3 Appliquer la politique aux personnes, dans Keycloak
 
-Console d’administration : **https://sso.lab.test:8443/admin/**, compte `kcadmin`, realm **lab** (démo 2, étape 2.3).
+Console d’administration : **https://sso.lab.test:8443/admin/**, compte `kcadmin`, realm **lab** (démo 2, étape 1).
 
 ### Complexité, longueur, historique, expiration
 
@@ -82,7 +82,7 @@ Laisser les deux champs *Quick login check milliseconds* (`1000`) et *Minimum qu
 
 ✅ **Attendu** (18 octobre) : deux refus, `Invalid password: minimum length 12.` puis `Invalid password: must contain at least 1 numerical digits.` Le mot de passe actuel d’`alice` n’est pas touché : une politique s’applique au **prochain changement**, pas aux mots de passe existants.
 
-**2. Le verrouillage fonctionne.** Le test se fait sur la page de connexion de Keycloak, par la fédération : dans une fenêtre privée, l’adresse de la démo 2, étape 2.7 (ou, sur Lab-Sunbeam, `python3 ~/test-sso-saml.py alice`). Saisir 5 fois un mauvais mot de passe pour `alice`, puis le bon.
+**2. Le verrouillage fonctionne.** Le test se fait sur la page de connexion de Keycloak, par la fédération : dans une fenêtre privée, l’adresse de la démo 2, étape 7a (ou, sur Lab-Sunbeam, `python3 ~/test-sso-saml.py alice`). Saisir 5 fois un mauvais mot de passe pour `alice`, puis le bon.
 
 ✅ **Attendu** (18 octobre, avec le script) :
 

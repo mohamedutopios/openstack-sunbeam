@@ -191,13 +191,10 @@ Puis supprimer `internal-ca` dans les autorités du navigateur.
 
 | Étape | Windows | Ubuntu |
 |---|---|---|
-| 2.2 Copier la CA du lab | `scp .\ca.crt vagrant@192.168.56.10:~/` | `scp ./ca.crt vagrant@192.168.56.10:~/` |
-| Console Keycloak | `https://sso.lab.test:8443/admin/`, « la CA du lab est approuvée sur Windows » | Même adresse ; `ca.crt` doit être importée **dans le navigateur** |
-| Script d’extraction | `scp .\lab-sunbeam\scripts\extract-sp.py vagrant@192.168.56.10:~/` | `scp ./lab-sunbeam/scripts/extract-sp.py vagrant@192.168.56.10:~/` |
-| Récupérer `keystone-sp.xml` (« PowerShell ») | `scp vagrant@192.168.56.10:~/keystone-sp.xml .` | Inchangé ; le fichier est ensuite importé dans Keycloak depuis le navigateur de l’hôte |
-| Règles de correspondance | `scp .\lab-sunbeam\mapping.json vagrant@192.168.56.10:~/lab/` | `scp ./lab-sunbeam/mapping.json vagrant@192.168.56.10:~/lab/` |
-| 2.7 Connexion SSO dans le navigateur | Prérequis : CA de Sunbeam importée sur Windows | Les **deux** CA dans le navigateur (`ca.crt` et `sunbeam-ca.crt`), et les deux noms dans `/etc/hosts` |
-| Script de test | `scp .\6-securite\outils\test-sso-saml.py vagrant@192.168.56.10:~/` | `scp ./7-securite/outils/test-sso-saml.py vagrant@192.168.56.10:~/` |
+| Étape 0, copier les quatre fichiers | `scp .\ca.crt .\lab-sunbeam\mapping.json .\lab-sunbeam\scripts\extract-sp.py .\7-securite\outils\test-sso-saml.py vagrant@192.168.56.10:~/` | `scp ./ca.crt ./lab-sunbeam/mapping.json ./lab-sunbeam/scripts/extract-sp.py ./7-securite/outils/test-sso-saml.py vagrant@192.168.56.10:~/` |
+| Étape 1, console Keycloak | `https://sso.lab.test:8443/admin/`, « la CA du lab est approuvée sur Windows » | Même adresse ; `ca.crt` doit être importée **dans le navigateur** |
+| Étape 5b, récupérer `keystone-sp.xml` (« PowerShell ») | `scp vagrant@192.168.56.10:~/keystone-sp.xml .` | Inchangé ; le fichier est ensuite importé dans Keycloak depuis le navigateur de l’hôte |
+| Étape 7a, connexion SSO dans le navigateur | Prérequis : CA de Sunbeam importée sur Windows | Les **deux** CA dans le navigateur (`ca.crt` et `sunbeam-ca.crt`), et les deux noms dans `/etc/hosts` |
 
 `test-sso-saml.py` tourne dans Lab-Sunbeam (`python3`, `requests` présent dans la VM) : inchangé. L’étape `tr -d '\r' < ~/ca.crt` reste sans effet nuisible sous Linux.
 

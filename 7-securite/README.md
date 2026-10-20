@@ -103,7 +103,7 @@ Ces points changent la façon de jouer les démos ; chacun est expliqué dans sa
 | 5 | `openstack port list --long` n’a pas de colonne pour la sécurité de port | Audit par l’API de Neutron |
 | 6 | Keystone ne nomme pas le compte visé par un échec `401` | Compter par adresse, ou par compte dans Keycloak |
 | 6 | `observability embedded` active aussi la télémétrie, prend 75 minutes et pousse la charge jusqu’à 77 ; Loki ne reçoit pas les journaux de la machine (`nova-compute`) | L’activer avant la séance ; `journalctl` pour la machine |
-| 2 | Le guide `Guide-Sunbeam-VirtualBox-Keycloak.md` (section 12) utilise `sunbeam identity provider add`, qui échoue sur ce lab | Suivre la démo 2, étape 2.4, plutôt que le guide |
+| 2 | Le guide `Guide-Sunbeam-VirtualBox-Keycloak.md` (section 12) utilise `sunbeam identity provider add`, qui échoue sur ce lab | Suivre la démo 2, étape 4, plutôt que le guide |
 
 ## Conventions
 

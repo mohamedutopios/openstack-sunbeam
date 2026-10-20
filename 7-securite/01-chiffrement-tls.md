@@ -96,7 +96,7 @@ TLS n’est pas absent partout (constaté le 18 octobre) :
 
 | Flux | Constat | Vérification |
 |---|---|---|
-| Navigateur → Keycloak | **HTTPS** seulement (`sslRequired: all` dans `lab-sunbeam/keycloak/realm.json`, port 8443) | `curl -s -o /dev/null -w "%{http_code}\n" --cacert ~/ca.crt https://sso.lab.test:8443/realms/lab` : `200` (copie de `ca.crt` : démo 2, étape 2.2) |
+| Navigateur → Keycloak | **HTTPS** seulement (`sslRequired: all` dans `lab-sunbeam/keycloak/realm.json`, port 8443) | `curl -s -o /dev/null -w "%{http_code}\n" --cacert ~/ca.crt https://sso.lab.test:8443/realms/lab` : `200` (copie de `ca.crt` : démo 2, étape 0) |
 | Réseau virtuel (OVN) | Certificats émis par l’application `certificate-authority` (charm `self-signed-certificates`) à `neutron`, `ovn-central`, `ovn-relay` | `juju status -m openstack --relations \| grep "^certificate-authority:certificates"` : trois lignes |
 | API publiques et internes | **HTTP** | ci-dessus |
 | Contrôleur Juju | Chiffré : l’API du contrôleur (`192.168.56.200:17070`) n’accepte que TLS, avec sa propre CA | `juju show-controller \| grep -E "api-endpoints\|ca-cert"` |
